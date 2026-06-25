@@ -12,5 +12,8 @@ data/
 # Jupyter
 .ipynb_checkpoints/
 
+# 서브에이전트 진행 원장 (scratch)
+.superpowers/
+
 # OS
 .DS_Store
