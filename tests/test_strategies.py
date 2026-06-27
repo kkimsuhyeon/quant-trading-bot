@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from backtest import run_backtest
 from strategies.rsi_reversion import RsiReversion
+from strategies.bollinger_reversion import BollingerReversion
 
 
 def _dip_recover(n=150):
@@ -19,6 +20,13 @@ def _dip_recover(n=150):
 
 def test_rsi_reversion_trades_and_stats():
     _, stats = run_backtest(_dip_recover(), RsiReversion)
+    assert stats["# Trades"] > 0
+    for key in ["Return [%]", "Sharpe Ratio", "Max. Drawdown [%]", "# Trades"]:
+        assert key in stats.index
+
+
+def test_bollinger_reversion_trades_and_stats():
+    _, stats = run_backtest(_dip_recover(), BollingerReversion)
     assert stats["# Trades"] > 0
     for key in ["Return [%]", "Sharpe Ratio", "Max. Drawdown [%]", "# Trades"]:
         assert key in stats.index
