@@ -56,4 +56,4 @@ BTC/USDT 1h, 약 3년, 수수료 0.1%/side:
 ## 관련
 - 가설: `notes/hypothesis_donchian_breakout.md`
 - 비교 노트북: `research/2026-06-27_six_strategy_compare.ipynb`
-- 설계: `docs/design/phase-2-baseline-compare.md`
+- 설계: `docs/design/phase-2b-more-strategies.md`

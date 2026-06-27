@@ -57,4 +57,4 @@ SMA 교차(308회)보다 훨씬 많이 거래해 결과가 더 나쁘다.
 ## 관련
 - 가설: `notes/hypothesis_macd_cross.md`
 - 비교 노트북: `research/2026-06-27_six_strategy_compare.ipynb`
-- 설계: `docs/design/phase-2-baseline-compare.md`
+- 설계: `docs/design/phase-2b-more-strategies.md`

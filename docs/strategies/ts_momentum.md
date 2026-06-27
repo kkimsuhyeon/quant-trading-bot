@@ -55,4 +55,4 @@ lookback=30봉은 1시간봉에서 너무 짧은 주기여서 노이즈를 모�
 ## 관련
 - 가설: `notes/hypothesis_ts_momentum.md`
 - 비교 노트북: `research/2026-06-27_six_strategy_compare.ipynb`
-- 설계: `docs/design/phase-2-baseline-compare.md`
+- 설계: `docs/design/phase-2b-more-strategies.md`
