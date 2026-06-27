@@ -2,12 +2,12 @@
 
 암호화폐 퀀트 백테스트 실험실. (배경·로드맵: [`PLAN.md`](PLAN.md), 설계: [`docs/design/`](docs/design/))
 
-> 요구사항: Python 3.9+
+> 요구사항: Python 3.13 (권장). venv는 `python3.13`로 생성.
 
 ## 설치
 
 ```bash
-python3 -m venv .venv
+python3.13 -m venv .venv
 source .venv/bin/activate         # Windows: .venv\Scripts\activate
 python -m pip install -r requirements.txt   # `pip` 대신 `python -m pip` (활성화된 venv에 정확히 설치)
 ```

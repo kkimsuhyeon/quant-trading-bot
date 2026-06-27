@@ -1,5 +1,5 @@
 ccxt
-pandas
+pandas>=2,<3   # backtesting 0.6.5 FractionalBacktest가 pandas 3.0 Copy-on-Write(read-only array)와 비호환
 pyarrow
 backtesting
 pytest
