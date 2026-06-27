@@ -20,6 +20,7 @@
 | 0 + 1 | 데이터 수집 + 백테스트 하네스 + SMA hello world | 설계 완료 (구현 전) | [phase-0-1-lab.md](phase-0-1-lab.md) |
 | 2 | baseline 전략 비교 (추세추종 vs 평균회귀) | 구현 완료 (Phase 3 검증 대기) | [phase-2-baseline-compare.md](phase-2-baseline-compare.md) |
 | 2b | 전략 확장 (Donchian / TSMom / MACD) + 6전략 비교 | 구현 완료 (Phase 3 검증 대기) | [phase-2b-more-strategies.md](phase-2b-more-strategies.md) |
+| 2c | 시간단위 비교 (1h vs 4h, 동일 6전략) | 구현 완료 | [phase-2c-4h-compare.md](phase-2c-4h-compare.md) |
 | 3 | 견고성 검증 (OOS / 워크포워드 / 민감도) | 예정 | — |
 | 4 | 페이퍼 트레이딩 (테스트넷) | 예정 | — |
 | 5 | AI sentiment 레이어 | 예정 | — |
