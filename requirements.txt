@@ -4,3 +4,4 @@ pyarrow
 backtesting
 pytest
 jupyter
+matplotlib
