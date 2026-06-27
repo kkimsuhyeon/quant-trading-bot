@@ -18,7 +18,7 @@
 | Phase | 범위 | 상태 | 상세 문서 |
 |---|---|---|---|
 | 0 + 1 | 데이터 수집 + 백테스트 하네스 + SMA hello world | 설계 완료 (구현 전) | [phase-0-1-lab.md](phase-0-1-lab.md) |
-| 2 | baseline 전략 비교 (추세추종 vs 평균회귀) | 예정 | — |
+| 2 | baseline 전략 비교 (추세추종 vs 평균회귀) | 구현 완료 (Phase 3 검증 대기) | [phase-2-baseline-compare.md](phase-2-baseline-compare.md) |
 | 3 | 견고성 검증 (OOS / 워크포워드 / 민감도) | 예정 | — |
 | 4 | 페이퍼 트레이딩 (테스트넷) | 예정 | — |
 | 5 | AI sentiment 레이어 | 예정 | — |
