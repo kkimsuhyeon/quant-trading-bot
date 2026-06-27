@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from backtest import run_backtest
 from strategies.donchian_breakout import DonchianBreakout, DONCHIAN_HIGH, DONCHIAN_LOW
+from strategies.ts_momentum import TimeSeriesMomentum
 
 STATS_KEYS = ["Return [%]", "Sharpe Ratio", "Max. Drawdown [%]", "# Trades"]
 
@@ -16,6 +17,13 @@ def _oscillating(n=500):
 
 def test_donchian_trades_and_stats():
     _, stats = run_backtest(_oscillating(), DonchianBreakout)
+    assert stats["# Trades"] > 0
+    for k in STATS_KEYS:
+        assert k in stats.index
+
+
+def test_ts_momentum_trades_and_stats():
+    _, stats = run_backtest(_oscillating(), TimeSeriesMomentum)
     assert stats["# Trades"] > 0
     for k in STATS_KEYS:
         assert k in stats.index
