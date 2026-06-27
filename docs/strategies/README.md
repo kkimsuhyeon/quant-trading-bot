@@ -11,5 +11,8 @@
 | SMA 교차 | 추세추종 | hello world (미검증) | [sma_cross.md](sma_cross.md) | `strategies/sma_cross.py` |
 | RSI 과매도 반등 | 평균회귀 | 검증 중 | [rsi_reversion.md](rsi_reversion.md) | `strategies/rsi_reversion.py` |
 | 볼린저 하단 반등 | 평균회귀 | 검증 중 | [bollinger_reversion.md](bollinger_reversion.md) | `strategies/bollinger_reversion.py` |
+| Donchian 돌파 | 돌파 | 검증 중 | [donchian_breakout.md](donchian_breakout.md) | `strategies/donchian_breakout.py` |
+| 시계열 모멘텀 | 모멘텀 | 검증 중 | [ts_momentum.md](ts_momentum.md) | `strategies/ts_momentum.py` |
+| MACD 교차 | 추세 | 검증 중 | [macd_cross.md](macd_cross.md) | `strategies/macd_cross.py` |
 
 상태 단계: **hello world → 검증 중 → 검증 통과 → 폐기**
