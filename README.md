@@ -8,8 +8,8 @@
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+source .venv/bin/activate         # Windows: .venv\Scripts\activate
+python -m pip install -r requirements.txt   # `pip` 대신 `python -m pip` (활성화된 venv에 정확히 설치)
 ```
 
 ## 1. 데이터 받기
