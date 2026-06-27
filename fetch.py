@@ -25,7 +25,7 @@ def fetch_paginated(exchange, symbol, timeframe, since, limit=1000):
     return all_rows
 
 
-def fetch_ohlcv(symbol="BTC/USDT", timeframe="1h", years=3, exchange=None):
+def fetch_ohlcv(symbol="BTC/USDT", timeframe="1h", years=5, exchange=None):
     exchange = exchange or ccxt.binance()
     since = exchange.milliseconds() - years * 365 * 24 * 60 * 60 * 1000
     rows = fetch_paginated(exchange, symbol, timeframe, since)
