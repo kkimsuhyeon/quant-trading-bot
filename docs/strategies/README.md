@@ -15,5 +15,8 @@
 | 시계열 모멘텀 | 모멘텀 | 검증 중 | [ts_momentum.md](ts_momentum.md) | `strategies/ts_momentum.py` |
 | MACD 교차 | 추세 | 검증 중 | [macd_cross.md](macd_cross.md) | `strategies/macd_cross.py` |
 | SMA 교차 + 손절 | 추세추종 | **검증 통과** (BTC+ETH) | [sma_cross_stop.md](sma_cross_stop.md) | `strategies/sma_cross_stop.py` |
+| Keltner 변동성 돌파 | 돌파 | **검증 통과** (BTC+ETH) | [keltner_breakout.md](keltner_breakout.md) | `strategies/keltner_breakout.py` |
+| 추세 필터 / Regime | 추세추종 | **검증 통과** (BTC+ETH) | [regime_filter.md](regime_filter.md) | `strategies/regime_filter.py` |
+| Z-score 평균회귀 | 평균회귀 | 폐기 (Phase 2e) | [zscore_reversion.md](zscore_reversion.md) | `strategies/zscore_reversion.py` |
 
 상태 단계: **hello world → 검증 중 → 검증 통과 → 폐기**

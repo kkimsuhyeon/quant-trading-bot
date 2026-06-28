@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import pytest
 from backtest import run_backtest
 from strategies.keltner_breakout import KeltnerBreakout
 from strategies.regime_filter import RegimeFilter
