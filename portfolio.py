@@ -27,11 +27,11 @@ def combine_equal_weight(equities, cash=10_000):
 def portfolio_metrics(equity):
     ret = (equity.iloc[-1] / equity.iloc[0] - 1) * 100
     mdd = (equity / equity.cummax() - 1).min() * 100
-    r = equity.pct_change().dropna()
+    r = equity.pct_change(fill_method=None).dropna()
     bars_per_year = 6 * 365                     # 4h봉: 하루 6개 (크립토 24/7)
     sharpe = (r.mean() / r.std()) * (bars_per_year ** 0.5) if r.std() > 0 else 0.0
     return {"Return [%]": ret, "Max. Drawdown [%]": mdd, "Sharpe Ratio": sharpe}
 
 
 def return_correlation(equities):
-    return equities.pct_change().corr()
+    return equities.pct_change(fill_method=None).corr()
