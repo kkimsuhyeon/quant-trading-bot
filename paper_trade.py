@@ -97,6 +97,7 @@ def run_once(dry_run=False, **kwargs):
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         print("[paper] 다른 실행 진행 중 — skip")
+        lock_file.close()
         return []
     try:
         return _append_signals(fetch_live(**kwargs), dry_run=dry_run)
