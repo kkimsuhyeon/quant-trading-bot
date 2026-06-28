@@ -90,7 +90,7 @@ def _append_signals(df, csv_path=SIGNALS_CSV, now=None, symbol="BTC/USDT",
     return rows
 
 
-def run_once(dry_run=False, **kwargs):
+def run_once(dry_run=False, symbol="BTC/USDT", timeframe="4h", **kwargs):
     os.makedirs("paper", exist_ok=True)
     lock_file = open(LOCK_PATH, "w")
     try:
@@ -100,7 +100,8 @@ def run_once(dry_run=False, **kwargs):
         lock_file.close()
         return []
     try:
-        return _append_signals(fetch_live(**kwargs), dry_run=dry_run)
+        df = fetch_live(symbol=symbol, timeframe=timeframe, **kwargs)
+        return _append_signals(df, symbol=symbol, timeframe=timeframe, dry_run=dry_run)
     finally:
         fcntl.flock(lock_file, fcntl.LOCK_UN)
         lock_file.close()

@@ -49,12 +49,15 @@ run_once(dry_run=False) -> None
 
 ### 2. `paper_report.py` — 오프라인 분석 (가끔 실행)
 ```text
-# paper/signals.csv 읽어(같은 (strategy, signal_bar_time) 중복은 마지막만):
-#  (a) signal-close proxy 곡선: 시그널 변화 시 신호봉 종가에 proxy 체결(수수료 0.1%/side)로 전진 페이퍼 수익곡선.
-#  (b) same-period backtest 곡선: 같은 기간 백테스트.
-#  → 두 곡선을 분리해서 본다(차이가 나는 게 정상). 시그널이 어긋난 봉 = 데이터/로직 갭 경보.
+# 1단계-1 범위(지금 구현): paper/signals.csv 읽어(같은 (strategy, signal_bar_time) 중복은 마지막만):
+#  load_signals(): 멱등키 dedup + 정렬.
+#  proxy_equity(): 시그널 변화 시 신호봉 종가에 proxy 체결(수수료 0.1%/side)로 전진 페이퍼 수익곡선.
 #  ("체결" 대신 proxy_price/signal_close 용어 — 실제 다음봉 시가 체결 규칙과 혼동 방지.)
 ```
+> **후속(데이터 누적 후 별도 task)**: same-period backtest 곡선과 라이브 시그널 *일치성 비교*는
+> signals.csv에 라이브 데이터가 수 주 쌓인 뒤에야 의미가 있다. 지금은 로그가 비어 있어 비교 대상이 없으므로
+> 1단계-1 범위에서 제외하고, 데이터가 쌓이면 추가한다(proxy 곡선 vs backtest 곡선을 분리해 표시 — 차이가
+> 나는 게 정상, 어긋난 봉 = 데이터/로직 갭 경보). (Codex 자문: 범위와 문서 정렬.)
 
 ## 데이터/상태
 - **`paper/signals.csv`** (append-only, **long-format**) = 단일 진실원천. 별도 state 파일 없음(2단계에서 필요).
