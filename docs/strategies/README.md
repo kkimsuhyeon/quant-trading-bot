@@ -14,5 +14,6 @@
 | Donchian 돌파 | 돌파 | 검증 중 | [donchian_breakout.md](donchian_breakout.md) | `strategies/donchian_breakout.py` |
 | 시계열 모멘텀 | 모멘텀 | 검증 중 | [ts_momentum.md](ts_momentum.md) | `strategies/ts_momentum.py` |
 | MACD 교차 | 추세 | 검증 중 | [macd_cross.md](macd_cross.md) | `strategies/macd_cross.py` |
+| SMA 교차 + 손절 | 추세추종 | **검증 통과** (BTC+ETH) | [sma_cross_stop.md](sma_cross_stop.md) | `strategies/sma_cross_stop.py` |
 
 상태 단계: **hello world → 검증 중 → 검증 통과 → 폐기**
