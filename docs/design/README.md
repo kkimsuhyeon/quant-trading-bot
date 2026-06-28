@@ -26,7 +26,7 @@
 | 3 | 견고성 검증 (OOS / 워크포워드 / 민감도) | 구현 완료 (Donchian 통과·SMA 탈락) | [phase-3-robustness.md](phase-3-robustness.md) |
 | 3b | ETH out-of-asset 재현 (Donchian) | 구현 완료 (ETH도 통과 — 2자산 검증) | [phase-3b-eth.md](phase-3b-eth.md) |
 | 3c | SMA 리스크룰 보강 재검증 (손절 추가) | 구현 완료 (BTC+ETH 통과 — 2번째 후보) | [phase-3c-sma-stop.md](phase-3c-sma-stop.md) |
-| 4 | 페이퍼 트레이딩 (테스트넷) | 예정 | — |
+| 4 | 페이퍼 트레이딩 — 1단계 섀도우(전진 테스트) | 설계 완료 (구현 중) | [phase-4-shadow.md](phase-4-shadow.md) |
 | 5 | AI sentiment 레이어 | 예정 | — |
 | 6 | 소액 실거래 (현물) | 예정 | — |
 | 7 | 확장 (포트폴리오 / 선물) | 예정 | — |
