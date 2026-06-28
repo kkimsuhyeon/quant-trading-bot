@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
-from robustness import train_test_split, time_segments, buy_hold
+from robustness import train_test_split, time_segments, buy_hold, evaluate, param_sweep, walk_forward, METRIC_KEYS
+from strategies.donchian_breakout import DonchianBreakout
 
 
 def _price_df(n=100):
@@ -41,3 +42,37 @@ def test_buy_hold_drawdown_on_dip():
     df = pd.DataFrame({"Open": close, "High": close, "Low": close,
                        "Close": close, "Volume": 1000.0}, index=idx)
     assert round(buy_hold(df)["Max. Drawdown [%]"], 2) == -50.0
+
+
+def test_metric_keys_exact():
+    assert METRIC_KEYS == ["Return [%]", "Buy & Hold Return [%]", "Sharpe Ratio",
+                           "Max. Drawdown [%]", "Win Rate [%]", "# Trades"]
+
+
+def _oscillating(n=600):
+    idx = pd.date_range("2020-01-01", periods=n, freq="4h", tz="UTC")
+    close = pd.Series(120 + 40 * np.sin(np.linspace(0, 8 * np.pi, n)), index=idx)
+    return pd.DataFrame({"Open": close, "High": close * 1.01, "Low": close * 0.99,
+                         "Close": close, "Volume": 1000.0}, index=idx)
+
+
+def test_evaluate_returns_metric_keys():
+    m = evaluate(_oscillating(), DonchianBreakout)
+    assert set(METRIC_KEYS) <= set(m)
+    assert isinstance(m["Return [%]"], float)
+
+
+def test_param_sweep_covers_grid():
+    grid = {"entry_n": [10, 20], "exit_n": [5, 10]}
+    out = param_sweep(_oscillating(), DonchianBreakout, grid)
+    assert len(out) == 4                              # 2x2 데카르트곱
+    assert {"entry_n", "exit_n"} <= set(out.columns)
+    assert "Return [%]" in out.columns
+
+
+def test_walk_forward_segments():
+    out = walk_forward(_oscillating(), DonchianBreakout, k=3)
+    assert len(out) == 3
+    assert list(out["segment"]) == [0, 1, 2]
+    assert {"start", "end"} <= set(out.columns)
+    assert out["start"].iloc[0] < out["end"].iloc[-1]
