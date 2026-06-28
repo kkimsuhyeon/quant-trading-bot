@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pandas as pd
 from robustness import train_test_split, time_segments, buy_hold, evaluate, param_sweep, walk_forward, METRIC_KEYS
@@ -60,6 +62,7 @@ def test_evaluate_returns_metric_keys():
     m = evaluate(_oscillating(), DonchianBreakout)
     assert set(METRIC_KEYS) <= set(m)
     assert isinstance(m["Return [%]"], float)
+    assert not math.isnan(m["Return [%]"])
 
 
 def test_param_sweep_covers_grid():
