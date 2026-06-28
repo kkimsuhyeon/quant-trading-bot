@@ -23,6 +23,7 @@
 | 2c | 시간단위 비교 (1h vs 4h, 동일 6전략) | 구현 완료 | [phase-2c-4h-compare.md](phase-2c-4h-compare.md) |
 | 2d | 5년(폭락장 포함) 1h·4h 비교 | 구현 완료 | [phase-2d-5yr-crash.md](phase-2d-5yr-crash.md) |
 | 3 | 견고성 검증 (OOS / 워크포워드 / 민감도) | 구현 완료 (Donchian 통과·SMA 탈락) | [phase-3-robustness.md](phase-3-robustness.md) |
+| 3b | ETH out-of-asset 재현 (Donchian) | 구현 완료 (ETH도 통과 — 2자산 검증) | [phase-3b-eth.md](phase-3b-eth.md) |
 | 4 | 페이퍼 트레이딩 (테스트넷) | 예정 | — |
 | 5 | AI sentiment 레이어 | 예정 | — |
 | 6 | 소액 실거래 (현물) | 예정 | — |

@@ -45,7 +45,8 @@ def save(df, symbol, timeframe, data_dir="data"):
 
 
 if __name__ == "__main__":
-    for tf in ["1h", "4h"]:
-        df = fetch_ohlcv("BTC/USDT", tf, years=5)
-        save(df, "BTC/USDT", tf)
-        print(f"{tf}: {len(df)} candles, {df.index[0]} ~ {df.index[-1]}")
+    for symbol in ["BTC/USDT", "ETH/USDT"]:
+        for tf in ["1h", "4h"]:
+            df = fetch_ohlcv(symbol, tf, years=5)
+            save(df, symbol, tf)
+            print(f"{symbol} {tf}: {len(df)} candles, {df.index[0]} ~ {df.index[-1]}")

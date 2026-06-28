@@ -17,7 +17,7 @@ python -m pip install -r requirements.txt   # `pip` 대신 `python -m pip` (활�
 `data/`는 저장소에 포함되지 않으므로 먼저 받아야 한다.
 
 ```bash
-python fetch.py                  # BTC/USDT 1h·4h 약 5년치 → data/ 생성 (인터넷 필요)
+python fetch.py                  # BTC·ETH/USDT 1h·4h 약 5년치 → data/ 생성 (인터넷 필요)
 ```
 
 ## 2. 백테스트 실행
