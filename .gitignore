@@ -17,3 +17,6 @@ data/
 
 # OS
 .DS_Store
+
+# 섀도우 페이퍼 트레이딩 출력
+paper/
