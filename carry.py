@@ -8,12 +8,13 @@ def carry_pnl(funding, notional=1.0, spot_fee=0.001, perp_fee=0.0005):
     return equity
 
 
-def carry_metrics(equity, funding, periods_per_year=1095):
+def carry_metrics(equity, periods_per_year=1095):
     ret = (equity.iloc[-1] / equity.iloc[0] - 1) * 100
     n = len(equity)
     ann = ((equity.iloc[-1] / equity.iloc[0]) ** (periods_per_year / n) - 1) * 100 if n > 0 else 0.0
     mdd = (equity / equity.cummax() - 1).min() * 100
-    sharpe = (funding.mean() / funding.std()) * (periods_per_year ** 0.5) if funding.std() > 0 else 0.0
+    r = equity.pct_change(fill_method=None).dropna()
+    sharpe = (r.mean() / r.std()) * (periods_per_year ** 0.5) if r.std() > 0 else 0.0
     return {"Return [%]": ret, "Ann Return [%]": ann, "Sharpe": sharpe, "MDD [%]": mdd}
 
 

@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 from carry import carry_pnl, carry_metrics, funding_stats
 
@@ -26,9 +25,28 @@ def test_carry_pnl_fees_can_exceed_small_funding():
 def test_carry_metrics_keys_and_mdd():
     f = _funding([0.001, -0.002, 0.001, 0.001])
     eq = carry_pnl(f)
-    m = carry_metrics(eq, f)
+    m = carry_metrics(eq)
     assert {"Return [%]", "Ann Return [%]", "Sharpe", "MDD [%]"} <= set(m)
     assert m["MDD [%]"] <= 0                            # 낙폭은 음수(또는 0)
+
+
+def test_carry_metrics_net_loss_has_negative_return_and_mdd():
+    # 펀딩(누적 0.0001)은 소폭 +지만 수수료 0.003로 순손실.
+    # gross 공식이었으면 Sharpe 부호가 +로 어긋났을 케이스.
+    f = _funding([0.0001, -0.0001, 0.0001])
+    eq = carry_pnl(f)
+    m = carry_metrics(eq)
+    assert m["Return [%]"] < 0
+    assert m["MDD [%]"] < 0
+
+
+def test_carry_metrics_uptrend_has_positive_sharpe_and_return():
+    # 매기 +0.001 꾸준히 → 수수료 후에도 명백히 우상향.
+    f = _funding([0.001] * 200)
+    eq = carry_pnl(f)
+    m = carry_metrics(eq)
+    assert m["Return [%]"] > 0
+    assert m["Sharpe"] > 0
 
 
 def test_funding_stats_neg_ratio():
