@@ -30,5 +30,5 @@
 | 5 | AI sentiment 레이어 | 예정 | — |
 | 6 | 소액 실거래 (현물) | 예정 | — |
 | 7a | 다코인 현물 포트폴리오 (분산 효과 검증) | 구현 완료 (분산효과 약함 — 크립토 고상관) | [phase-7a-multicoin.md](phase-7a-multicoin.md) |
-| 7b-carry | 펀딩 캐리 (독립 손익원 존재 검증, v1) | 설계 완료 (구현 중) | [phase-7b-carry.md](phase-7b-carry.md) |
+| 7b-carry | 펀딩 캐리 (독립 손익원 존재 검증, v1) | 구현 완료 (첫 무상관 양수 엣지 — 단 gross, 실행미검증) | [phase-7b-carry.md](phase-7b-carry.md) |
 | 7b+ | 확장 (선물 롱/숏·레버리지) | 예정 | — |
