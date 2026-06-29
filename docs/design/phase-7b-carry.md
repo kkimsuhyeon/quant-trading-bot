@@ -27,8 +27,8 @@ carry_pnl(funding, notional=1.0, spot_fee=0.001, perp_fee=0.0005) -> pd.Series
     # equity = notional*(1 + cumsum(funding)) - 4-leg 수수료(진입 t0 + 청산 마지막).
     #   진입 수수료 = notional*(spot_fee+perp_fee), 청산 동일. (총 2*(spot_fee+perp_fee).)
 
-carry_metrics(equity, funding) -> dict
-    # Return%, 연율 Return%, Sharpe(펀딩수익 기준), MDD, 음수펀딩 구간 낙폭.
+carry_metrics(equity, periods_per_year=1095) -> dict
+    # Return%, 연율 Return%, Sharpe(equity 수수료반영 기준), MDD. (periods_per_year=8h*3*365)
 
 funding_stats(funding) -> dict        # 평균/중앙/5·95 percentile/음수비율
 ```
@@ -84,6 +84,7 @@ funding_stats(funding) -> dict        # 평균/중앙/5·95 percentile/음수비
 - **펀딩 캐리 = 우리가 찾은 첫 "진짜 무관한 양수 엣지"** (포트폴리오 분산의 실제 후보). 추세 엣지와 묶으면 *진짜* 분산이 가능.
 - 단 **규모/위험은 미검증** — Sharpe 22는 환상. 실거래로 가려면 **7b-v2(실행 현실성: basis·청산·거래소 위험 모델 + 테스트넷 양다리)** 가 전제.
 - 권장: "독립 양수 손익원 존재"는 확인됐으니, 다음은 **(a) 7b-v2로 실행 현실성 검증**, 또는 **(b) 추세+캐리 2-엣지 포트폴리오 개념검증**(상관 ~0이라 진짜 분산 효과 기대).
+- **(Codex 노트, 7b-v2용)** 펀딩 parquet 인덱스에 ms 단위 jitter 존재. 누적·연도별·일간 리샘플 상관엔 무해하나, **7b-v2에서 8h OHLCV와 결합 시 exact-timestamp join 금지** — resample/round 기준을 명시할 것.
 
 ## 산출물
 - `carry.py` + `tests/test_carry.py` (synthetic 펀딩 시계열, data/·네트워크 비의존)
