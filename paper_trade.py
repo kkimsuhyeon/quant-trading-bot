@@ -121,7 +121,10 @@ def record_funding(symbols=("BTC/USDT:USDT", "ETH/USDT:USDT"), csv_path=FUNDING_
             print(f"[funding] {sym} fetch 실패 — skip: {e}")
             continue
         ft_ms = fr.get("fundingTimestamp") or (fr.get("info") or {}).get("nextFundingTime")
-        funding_time = pd.to_datetime(int(ft_ms), unit="ms", utc=True).isoformat() if ft_ms else ""
+        if not ft_ms:                                   # 정산시각 없으면 dedup키 불안정 → 기록 skip(오염 방지)
+            print(f"[funding] {sym} funding_time 없음 — skip")
+            continue
+        funding_time = pd.to_datetime(int(ft_ms), unit="ms", utc=True).isoformat()
         if (sym, funding_time) in existing:
             continue
         rows.append({
