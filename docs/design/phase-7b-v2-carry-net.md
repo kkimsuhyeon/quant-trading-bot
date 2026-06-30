@@ -67,4 +67,42 @@ negative_funding_stats(funding) -> dict
 - `research/2026-06-30_phase7b_v2_carry_net.ipynb` (3 fee×3 haircut net 표 + 음수레짐 지표 + rolling 최악 + 추세 상관 유지 확인)
 - 본 문서 + `docs/design/README.md` 인덱스
 
-*(결과·판정은 분석 실행 후 본 문서에 추가)*
+## 결과 (BTC/ETH perp 펀딩 8h, 2021-06~2026-06)
+
+### net 연수익률 (fee=base) — "gross가 비용 후 남나"
+| haircut | BTC Ann% | ETH Ann% | 50:50 바스켓 |
+|---|---|---|---|
+| 0% (gross=v1) | 6.46 | 6.22 | — |
+| **2% (base)** | **4.86** | **4.60** | +4.73 |
+| 4% (stress) | 3.15 | 2.87 | +3.01 |
+| 6% (severe) | 1.31 | 1.02 | +1.17 |
+
+→ **base·stress·severe haircut 후에도 BTC·ETH·바스켓 전부 net 양수.** severe 6%에서도 +1% 남음.
+
+### fee 민감도 (haircut 2% 고정)
+base 4.86 / low 4.87 / high 4.84 (BTC) — **수수료는 거의 무관**. 4-leg 1회 모델이라 fee가 엣지 대비 미미 → **haircut이 결정 변수**.
+
+### 음수 펀딩 레짐 (데이터 기반) + rolling 90일 최악 net (base/2%)
+| 자산 | 최장 음수 streak | 음수 비율 | 음수 구간 합 | rolling 90일 최악 |
+|---|---|---|---|---|
+| BTC | 18 (≈6일) | 15% | -0.038 | **-0.69%** |
+| ETH | 25 (≈8일) | 17% | -0.063 | **-2.01%** |
+
+→ 음수 펀딩 구간은 존재하나 **얕다**(최악 90일 net −0.7%~−2.0%).
+
+### 상관 유지 (net carry base/2% 일간 vs 추세·가격)
+net_carry_BTC vs Regime **0.016** / Keltner **-0.022** / BTC_price **-0.041** → **net으로도 상관 ~0 유지**(haircut이 deterministic이라 독립 구조 안 바뀜).
+
+## 판정 (사전등록 기준 대조)
+✅ **통과.** 사전 기준 전부 충족:
+- base 2% 후 BTC·ETH 둘 다 net>0 ✅ / stress 4% 후 둘 다(+바스켓) net>0 ✅(기준은 "최소 한쪽" — 초과 달성) / severe 6% 후에도 양수(음수면 정상이라 했는데 양수) ✅
+- rolling 90일 최악 net −0.7%~−2.0% = 감당 가능 ✅ / 추세와 상관 ~0 유지 ✅
+- **v1 "독립 손익원 존재" → v2 "비용/haircut 후에도 edge margin 남음"이 확인됨.** net ~3~5%/yr(base~stress), 얇지만 실재.
+
+**단, 통과해도 "testnet 후보"이지 실거래 후보 아님** (사전 약속). 다음 관문은 *모델링이 아니라 실제 testnet 양다리 실행*.
+
+## ⚠️ 정직한 한계 (★ 통과했어도 — Codex)
+- **haircut(연 2/4/6%)은 거친 proxy다.** 실제 basis/슬리피지는 시변·상태의존 — 데이터 부재로 정밀화 불가. net 수치는 "이 정도 마찰이면"이라는 *조건부* 값.
+- **모델 밖 tail이 net 추정에 *미포함***: 거래소 파산(FTX식)·ADL·withdrawal halt·극단 basis blowup·청산. 이것들이 드물지만 큰 손실을 만들 수 있고 v2는 이를 안 잡는다. → **net 양수가 "안전"을 뜻하지 않는다.**
+- 단일 역사 경로(2021~2026)·BTC/ETH 2자산·1x만. 미래 펀딩 압축(붐비는 트레이드) 가능.
+- **결론: "모델 가능한 마찰 후에도 엣지가 남는다"까지가 v2의 정직한 한계.** 그 이상(tail 안전성)은 testnet에서만 확인된다.
