@@ -27,6 +27,8 @@
 | 3b | ETH out-of-asset 재현 (Donchian) | 구현 완료 (ETH도 통과 — 2자산 검증) | [phase-3b-eth.md](phase-3b-eth.md) |
 | 3c | SMA 리스크룰 보강 재검증 (손절 추가) | 구현 완료 (BTC+ETH 통과 — 2번째 후보) | [phase-3c-sma-stop.md](phase-3c-sma-stop.md) |
 | 4 | 페이퍼 트레이딩 — 1단계 섀도우(전진 테스트) | 구현 완료 (proxy 곡선; 백테스트 비교·테스트넷은 후속) | [phase-4-shadow.md](phase-4-shadow.md) |
+| 4b | 섀도우 cron 확장 (sentiment 로깅 + 펀딩 기록기) | 구현 완료 (섀도우 유지, 주문X) | [phase-4b-cron-extend.md](phase-4b-cron-extend.md) |
+| 4c | 현물 demo 실행 엔진 (Keltner, 2단계=실제주문) | 설계 완료 (구현 전; demo 시장가·킬스위치·dry-run) | [phase-4c-demo-executor.md](phase-4c-demo-executor.md) |
 | 5 | sentiment 오버레이 (Fear&Greed 필터) | 구현 완료 (약한·일관 양(+), Keltner만 사전바 통과 / Regime 미흡 — 게임체인저 아님) | [phase-5-sentiment.md](phase-5-sentiment.md) |
 | 6 | 소액 실거래 (현물) | 예정 | — |
 | 7a | 다코인 현물 포트폴리오 (분산 효과 검증) | 구현 완료 (분산효과 약함 — 크립토 고상관) | [phase-7a-multicoin.md](phase-7a-multicoin.md) |
