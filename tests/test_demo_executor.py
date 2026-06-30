@@ -1,6 +1,24 @@
 import json
 import pytest
+import pandas as pd
 import demo_executor as dx
+
+
+def _df_uptrend():
+    """Keltner 롱 신호를 유발하는 상승추세 4h df (UTC timezone-aware DatetimeIndex)"""
+    n = 200
+    base = 50000.0
+    idx = pd.date_range("2024-01-01", periods=n, freq="4h", tz="UTC")
+    closes = [base + i * 100 for i in range(n)]
+    opens = [c - 50 for c in closes]
+    highs = [c + 200 for c in closes]
+    lows = [c - 200 for c in closes]
+    vols = [100.0] * n
+    df = pd.DataFrame(
+        {"Open": opens, "High": highs, "Low": lows, "Close": closes, "Volume": vols},
+        index=idx,
+    )
+    return df
 
 
 def test_state_roundtrip(tmp_path):
@@ -127,3 +145,34 @@ def test_reconcile_halted_guard_skips_order():
     assert ex.orders == []
     assert r["action"] == "error"
     assert r.get("note") == "halted"
+
+
+# ── Task 3: run_once 테스트 ───────────────────────────────────────────────────
+
+def test_run_once_kill_switch_halts_and_flattens(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ex = FakeEx()
+    ex.private_get_account = lambda: {"balances": [{"asset": "USDT", "free": "100"},
+                                                   {"asset": "BTC", "free": "0.1"}]}
+    ex.load_markets = lambda: ex.markets
+    # 고점 12000 저장 → 현재 equity ~ 100 + 0.1*60000=6100 → -49% breach
+    dx.save_state({"high_water": 12000.0, "halted": False, "reason": "",
+                   "last_order_signal_bar_time": ""}, dx.STATE_PATH)
+    df = _df_uptrend()                       # 헬퍼: Keltner 롱 유발 4h df
+    r = dx.run_once(live=True, exchange=ex, fetch=lambda **k: df,
+                    now=df.index[-1] + pd.Timedelta(hours=4))
+    st = dx.load_state(dx.STATE_PATH)
+    assert st["halted"] is True
+    assert ("sell", 0.1) in ex.orders        # 보유분 1회 청산
+    assert r["halted"] is True
+
+
+def test_run_once_skips_when_already_halted(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ex = FakeEx(); ex.private_get_account = lambda: {"balances": []}; ex.load_markets = lambda: ex.markets
+    dx.save_state({"high_water": 1.0, "halted": True, "reason": "prev",
+                   "last_order_signal_bar_time": ""}, dx.STATE_PATH)
+    df = _df_uptrend()
+    r = dx.run_once(live=True, exchange=ex, fetch=lambda **k: df,
+                    now=df.index[-1] + pd.Timedelta(hours=4))
+    assert ex.orders == [] and r["halted"] is True     # halted면 신규진입 금지

@@ -103,3 +103,73 @@ def reconcile(exchange, target, usdt, base_qty, price, market, bar_iso, state, d
         state["last_order_signal_bar_time"] = bar_iso
         log_order({**base, "action": "sell", "order_id": o.get("id"), "cost_or_qty": qty, "note": ""})
         return {"action": "sell", "order": o}
+
+
+def make_exchange():
+    ex = ccxt.binance({"apiKey": os.environ.get("BINANCE_TESTNET_API_KEY"),
+                       "secret": os.environ.get("BINANCE_TESTNET_API_SECRET")})
+    for k in list(ex.urls["api"]):
+        if isinstance(ex.urls["api"][k], str):
+            ex.urls["api"][k] = ex.urls["api"][k].replace("https://api.binance.com", DEMO_BASE)
+    return ex
+
+
+def _balances(exchange):
+    acct = exchange.private_get_account()             # demo는 /api/v3/account 사용(fetch_balance는 sapi라 X)
+    b = {x["asset"]: float(x["free"]) for x in acct["balances"]}
+    return b.get("USDT", 0.0), b.get(BASE_ASSET, 0.0)
+
+
+def run_once(live=False, exchange=None, fetch=None, now=None):
+    os.makedirs("paper", exist_ok=True)
+    lock_file = open(LOCK_PATH, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("[demo] 다른 실행 중 — skip"); lock_file.close(); return {"skip": "lock"}
+    try:
+        exchange = exchange or make_exchange()
+        fetch = fetch or fetch_live
+        markets = exchange.load_markets()
+        market = markets[SYMBOL] if isinstance(markets, dict) and SYMBOL in markets else exchange.markets[SYMBOL]
+        if now is None:
+            now = pd.Timestamp.now(tz="UTC")
+
+        df = fetch(symbol=SYMBOL, timeframe="4h")
+        if _is_stale(df.index[-1], now, "4h"):
+            print("[demo] STALE — skip"); return {"skip": "stale"}
+
+        usdt, base_qty = _balances(exchange)
+        price = float(df["Close"].iloc[-1])
+        equity = usdt + base_qty * price
+        state = load_state()
+
+        if state.get("halted"):
+            print(f"[demo] HALTED({state.get('reason')}) — 수동 리셋 전 거래 안 함")
+            return {"halted": True, "reason": state.get("reason")}
+
+        breach = update_high_water_and_breach(equity, state)
+        if breach:                                    # 상태 먼저 저장 → 1회 청산
+            state["halted"] = True; state["reason"] = f"drawdown<=-{int(DD_LIMIT*100)}%"
+            save_state(state)
+            if is_holding(base_qty, price, market["limits"]["cost"]["min"] or 0) and live:
+                exchange.create_market_sell_order(SYMBOL, float(exchange.amount_to_precision(SYMBOL, base_qty)))
+            print("[demo] KILL-SWITCH 발동 — 청산+정지"); return {"halted": True}
+
+        bar_iso = df.index[-1].isoformat()
+        target = desired_position(df, KeltnerBreakout)
+        res = reconcile(exchange, target, usdt, base_qty, price, market, bar_iso, state, dry_run=not live)
+        save_state(state)
+        print(f"[demo] target={target} action={res.get('action')} equity={equity:.2f} {'(dry-run)' if not live else ''}")
+        return {"target": target, **res, "halted": False}
+    finally:
+        fcntl.flock(lock_file, fcntl.LOCK_UN); lock_file.close()
+
+
+if __name__ == "__main__":
+    live = "--live" in sys.argv
+    if live:                                          # --live 전 demo 연결/키 검증
+        ex = make_exchange()
+        ex.private_get_account()                      # 실패 시 예외로 즉시 중단(주문 전)
+        print("[demo] demo 계정 인증 확인됨 — LIVE 모드")
+    run_once(live=live)
