@@ -18,7 +18,7 @@ def attach_fng(df, fng):
     D 값은 D+1부터 사용(인덱스 +1일 shift) → df 인덱스로 ffill → numeric float.
     df 시작 전 결측은 NaN(= 필터 off). 원본 df는 변경하지 않는다."""
     avail = fng.sort_index().copy()
-    avail.index = avail.index + pd.Timedelta(days=1)           # D 값은 D+1 00:00 UTC부터 사용 가능
+    avail.index = avail.index.shift(1, freq="D")               # D 값은 D+1 00:00 UTC부터 사용 가능
     s = avail.reindex(avail.index.union(df.index)).ffill().reindex(df.index)
     out = df.copy()
     out["sentiment"] = pd.to_numeric(s, errors="coerce").astype("float64")
