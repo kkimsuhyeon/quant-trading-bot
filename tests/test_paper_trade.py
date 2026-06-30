@@ -44,7 +44,8 @@ def test_params_repr_excludes_sentiment():
 
 
 def test_strategies_has_four():
-    assert {"keltner", "regime", "donchian", "sma_stop"} <= set(STRATEGIES)
+    assert set(STRATEGIES) == {"keltner", "regime", "donchian", "sma_stop",
+                               "keltner_sentiment", "regime_sentiment"}
 
 
 def test_is_stale():
@@ -62,7 +63,8 @@ def test_append_signals_schema_and_idempotency(tmp_path):
     assert len(rows1) == 6                                  # 6전략(sentiment 변형 포함)
     saved = pd.read_csv(csv)
     assert list(saved.columns) == COLUMNS_EXPECTED
-    assert {"keltner", "regime", "donchian", "sma_stop"} <= set(saved["strategy"])
+    assert set(saved["strategy"]) == {"keltner", "regime", "donchian", "sma_stop",
+                                       "keltner_sentiment", "regime_sentiment"}
     rows2 = _append_signals(df, csv_path=csv, now=now)      # 같은 봉 재실행
     assert rows2 == []                                      # 멱등: 중복 skip
     assert len(pd.read_csv(csv)) == 6                       # 행 수 그대로
