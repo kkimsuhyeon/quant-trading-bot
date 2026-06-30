@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
-from portfolio import equity_curve, per_coin_equity
-from portfolio import combine_equal_weight, portfolio_metrics, return_correlation
+from portfolio import (equity_curve, per_coin_equity, combine_equal_weight,
+                       combine_sleeves, portfolio_metrics, return_correlation)
 from strategies.sma_cross import SmaCross
 
 
@@ -10,6 +10,10 @@ def _osc(n=400, start="2021-01-01"):
     close = pd.Series(120 + 40 * np.sin(np.linspace(0, 8 * np.pi, n)), index=idx)
     return pd.DataFrame({"Open": close, "High": close * 1.01, "Low": close * 0.99,
                          "Close": close, "Volume": 1000.0}, index=idx)
+
+
+def _days(start, n):
+    return pd.date_range(start, periods=n, freq="1D", tz="UTC")
 
 
 def test_equity_curve_series_starts_near_cash():
@@ -55,3 +59,42 @@ def test_return_correlation_perfect():
     a = pd.Series([1., 2., 3., 4., 5.], index=idx)
     c = return_correlation(pd.DataFrame({"A": a, "B": a * 2}))
     assert round(c.loc["A", "B"], 4) == 1.0
+
+
+def test_combine_identical_equal_weight():
+    # 같은 곡선 둘을 등가중 → 결합은 그 곡선(현금 정규화)과 동일 형태
+    idx = _days("2021-01-01", 5)
+    a = pd.Series([100, 110, 121, 133.1, 146.41], index=idx)
+    c = combine_sleeves({"x": a, "y": a}, cash=1000)
+    assert abs(c.iloc[0] - 1000) < 1e-6
+    assert abs(c.iloc[-1] - 1464.1) < 1e-3   # 1000 * 1.4641
+
+
+def test_combine_normalizes_to_common_window_not_own_first():
+    # a는 공통창 '전'에 2배 뛰지만, 정규화는 공통창 첫 row 기준이라 그 성과는 빠져야 한다
+    a = pd.Series([1, 2, 4, 4, 4], index=_days("2021-01-01", 5))
+    b = pd.Series([10, 10, 10], index=_days("2021-01-03", 3))   # 늦게 시작, flat
+    c = combine_sleeves({"a": a, "b": b}, weights={"a": 0.5, "b": 0.5}, cash=1000)
+    assert len(c) == 3                       # 공통창 = 01-03~01-05
+    assert abs(c.iloc[0] - 1000) < 1e-6
+    assert abs(c.iloc[-1] - 1000) < 1e-6     # a의 창밖 2배 상승은 결합에 반영 안 됨
+
+
+def test_combine_weights_change_result():
+    idx = _days("2021-01-01", 2)
+    up = pd.Series([100, 200], index=idx)    # +100%
+    flat = pd.Series([100, 100], index=idx)  # flat
+    c5050 = combine_sleeves({"u": up, "f": flat}, weights={"u": 0.5, "f": 0.5}, cash=1000)
+    c7030 = combine_sleeves({"u": up, "f": flat}, weights={"u": 0.7, "f": 0.3}, cash=1000)
+    assert abs(c5050.iloc[-1] - 1500) < 1e-6   # 0.5*2 + 0.5*1 = 1.5
+    assert abs(c7030.iloc[-1] - 1700) < 1e-6   # 0.7*2 + 0.3*1 = 1.7
+
+
+def test_metrics_periods_per_year_scales_sharpe_only():
+    rets = np.array([0.02, -0.01] * 50)        # std>0
+    eq = pd.Series(100 * np.cumprod(1 + rets), index=_days("2021-01-01", 100))
+    m_default = portfolio_metrics(eq)           # 6*365
+    m_daily = portfolio_metrics(eq, periods_per_year=365)
+    assert abs(m_default["Sharpe Ratio"] / m_daily["Sharpe Ratio"] - 6 ** 0.5) < 1e-6
+    assert m_default["Return [%]"] == m_daily["Return [%]"]      # 연율화는 Return/MDD 불변
+    assert m_default["Max. Drawdown [%]"] == m_daily["Max. Drawdown [%]"]

@@ -21,7 +21,7 @@
 
 **Files:**
 - Modify: `portfolio.py` (함수 1개 추가, `portfolio_metrics` 시그니처 1개 변경)
-- Test: `tests/test_portfolio.py` (신규)
+- Test: `tests/test_portfolio.py` (기존 — Phase 7a 테스트 6개 보존 + 신규 4개 추가)
 
 **Interfaces:**
 - Consumes: 기존 `portfolio.py`의 import(`pandas as pd`).

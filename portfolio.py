@@ -24,12 +24,22 @@ def combine_equal_weight(equities, cash=10_000):
     return pd.DataFrame(contribs).sum(axis=1)
 
 
-def portfolio_metrics(equity):
+def combine_sleeves(equities, weights=None, freq="1D", cash=10_000):
+    names = list(equities.keys())
+    if weights is None:
+        weights = {n: 1 / len(names) for n in names}
+    # 1) 각 sleeve 일간 리샘플 → 2) 한 DataFrame → 3) 공통창 dropna
+    df = pd.DataFrame({n: equities[n].resample(freq).last() for n in names}).dropna()
+    # 4) 공통창 첫 row로 정규화 → 5) cash*weight 가중 합산
+    parts = {n: cash * weights[n] * df[n] / df[n].iloc[0] for n in names}
+    return pd.DataFrame(parts).sum(axis=1)
+
+
+def portfolio_metrics(equity, periods_per_year=6 * 365):
     ret = (equity.iloc[-1] / equity.iloc[0] - 1) * 100
     mdd = (equity / equity.cummax() - 1).min() * 100
     r = equity.pct_change(fill_method=None).dropna()
-    bars_per_year = 6 * 365                     # 4h봉: 하루 6개 (크립토 24/7)
-    sharpe = (r.mean() / r.std()) * (bars_per_year ** 0.5) if r.std() > 0 else 0.0
+    sharpe = (r.mean() / r.std()) * (periods_per_year ** 0.5) if r.std() > 0 else 0.0
     return {"Return [%]": ret, "Max. Drawdown [%]": mdd, "Sharpe Ratio": sharpe}
 
 
