@@ -1,5 +1,6 @@
 import pandas as pd
 from backtesting import Strategy
+from strategies.sentiment_filter import sentiment_risk_off
 
 
 def EMA(series, n):
@@ -19,12 +20,18 @@ class KeltnerBreakout(Strategy):
     atr_mult = 2.0
     stop_loss_pct = 0.05
     use_sentiment = False
+    sentiment_threshold = 75
 
     def init(self):
         self.ema = self.I(EMA, self.data.Close, self.ema_n)
         self.atr = self.I(ATR, self.data.High, self.data.Low, self.data.Close, self.atr_n)
 
     def next(self):
+        _sv = self.data.sentiment[-1] if self.use_sentiment else float("nan")
+        if sentiment_risk_off(self.use_sentiment, _sv, self.sentiment_threshold):
+            if self.position:
+                self.position.close()
+            return
         price = self.data.Close[-1]
         upper = self.ema[-1] + self.atr_mult * self.atr[-1]
         if not self.position:
