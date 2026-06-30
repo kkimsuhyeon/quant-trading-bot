@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 import pytest
 import pandas as pd
 import demo_executor as dx
@@ -160,7 +161,7 @@ def test_run_once_kill_switch_halts_and_flattens(tmp_path, monkeypatch):
                    "last_order_signal_bar_time": ""}, dx.STATE_PATH)
     df = _df_uptrend()                       # 헬퍼: Keltner 롱 유발 4h df
     r = dx.run_once(live=True, exchange=ex, fetch=lambda **k: df,
-                    now=df.index[-1] + pd.Timedelta(hours=4))
+                    now=df.index[-1] + timedelta(hours=4))
     st = dx.load_state(dx.STATE_PATH)
     assert st["halted"] is True
     assert ("sell", 0.1) in ex.orders        # 보유분 1회 청산
@@ -174,5 +175,5 @@ def test_run_once_skips_when_already_halted(tmp_path, monkeypatch):
                    "last_order_signal_bar_time": ""}, dx.STATE_PATH)
     df = _df_uptrend()
     r = dx.run_once(live=True, exchange=ex, fetch=lambda **k: df,
-                    now=df.index[-1] + pd.Timedelta(hours=4))
+                    now=df.index[-1] + timedelta(hours=4))
     assert ex.orders == [] and r["halted"] is True     # halted면 신규진입 금지
