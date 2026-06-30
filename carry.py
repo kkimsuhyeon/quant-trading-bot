@@ -26,3 +26,29 @@ def funding_stats(funding):
         "p95": funding.quantile(0.95),
         "neg_ratio": (funding < 0).mean(),
     }
+
+
+def net_carry_pnl(funding, notional=1.0, spot_fee=0.001, perp_fee=0.0005,
+                  annual_haircut=0.02, periods_per_year=1095):
+    """v1 gross 캐리에 연 haircut을 매 기간 균등 차감한 net 손익곡선. carry_pnl 재사용(DRY)."""
+    drag = annual_haircut / periods_per_year          # 매 8h basis/슬리피지 haircut
+    return carry_pnl(funding - drag, notional=notional, spot_fee=spot_fee, perp_fee=perp_fee)
+
+
+def rolling_worst_return(equity, window=270):
+    """최악 window-기간 수익률(기본 270 = 90일*3, 8h봉). equity[t]/equity[t-window]-1 의 최소."""
+    return (equity / equity.shift(window) - 1).min()
+
+
+def negative_funding_stats(funding):
+    """음수 펀딩 레짐 지표: 최장 연속 음수 개수 / 음수 구간 합 / 음수 비율."""
+    neg = funding < 0
+    longest = streak = 0
+    for v in neg:
+        streak = streak + 1 if v else 0
+        longest = max(longest, streak)
+    return {
+        "longest_neg_streak": longest,
+        "neg_total": funding[neg].sum(),
+        "neg_ratio": neg.mean(),
+    }
