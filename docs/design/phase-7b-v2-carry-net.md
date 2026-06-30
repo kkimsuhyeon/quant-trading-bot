@@ -81,6 +81,7 @@ negative_funding_stats(funding) -> dict
 
 ### fee 민감도 (haircut 2% 고정)
 base 4.86 / low 4.87 / high 4.84 (BTC) — **수수료는 거의 무관**. 4-leg 1회 모델이라 fee가 엣지 대비 미미 → **haircut이 결정 변수**.
+(단 이 "fee 무관"은 **always-on 4-leg 1회 진입/청산 가정** 때문이다 — Codex 노트. 실제 testnet에서 리밸런싱·롤오버·재헷지를 하면 수수료가 더 든다. testnet 전제에 유의.)
 
 ### 음수 펀딩 레짐 (데이터 기반) + rolling 90일 최악 net (base/2%)
 | 자산 | 최장 음수 streak | 음수 비율 | 음수 구간 합 | rolling 90일 최악 |
