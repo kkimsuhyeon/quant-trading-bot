@@ -50,7 +50,13 @@ def log_order(row, path=ORDERS_CSV):
 
 
 def reconcile(exchange, target, usdt, base_qty, price, market, bar_iso, state, dry_run):
-    min_notional = market["limits"]["cost"]["min"] or 0
+    if state.get("halted"):
+        log_order({"run_at": pd.Timestamp.now(tz="UTC").isoformat(), "target": target,
+                   "base_qty": base_qty, "price": price, "equity": usdt + base_qty * price,
+                   "bar_iso": bar_iso, "dry_run": dry_run,
+                   "action": "halted_skip", "order_id": "", "cost_or_qty": "", "note": "halted"})
+        return {"action": "error", "note": "halted"}
+    min_notional = market["limits"]["cost"]["min"] or 10.0
     holding = is_holding(base_qty, price, min_notional)
     equity = usdt + base_qty * price
     base = {"run_at": pd.Timestamp.now(tz="UTC").isoformat(), "target": target,

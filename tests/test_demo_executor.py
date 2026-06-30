@@ -50,9 +50,11 @@ def test_reconcile_buys_when_target_long_and_flat(tmp_path):
 
 def test_reconcile_sells_all_when_target_flat_and_holding(tmp_path):
     ex = FakeEx(); st = {"last_order_signal_bar_time": ""}
-    dx.reconcile(ex, target=0, usdt=100, base_qty=0.5, price=60000,
-                 market=ex.markets["BTC/USDT"], bar_iso="b1", state=st, dry_run=False)
+    r = dx.reconcile(ex, target=0, usdt=100, base_qty=0.5, price=60000,
+                     market=ex.markets["BTC/USDT"], bar_iso="b1", state=st, dry_run=False)
     assert ex.orders == [("sell", 0.5)]
+    assert r["action"] == "sell"
+    assert st["last_order_signal_bar_time"] == "b1"
 
 
 def test_reconcile_idempotent_when_already_in_state():
@@ -96,3 +98,32 @@ def test_reconcile_order_error_halts_state():
     assert st["halted"] is True
     assert st["reason"] == "order_error_manual_check"
     assert ex.orders == []  # 성공한 주문 없음
+
+
+def test_reconcile_sell_error_halts_state():
+    """create_market_sell_order 예외 → state halted, error 반환, 주문 기록 없음"""
+    class FakeExSellError(FakeEx):
+        def create_market_sell_order(self, s, qty):
+            raise Exception("sell_timeout")
+
+    ex = FakeExSellError()
+    st = {"last_order_signal_bar_time": "", "halted": False, "reason": ""}
+    r = dx.reconcile(ex, target=0, usdt=100, base_qty=0.5, price=60000,
+                     market=ex.markets["BTC/USDT"], bar_iso="b1", state=st,
+                     dry_run=False)
+    assert r["action"] == "error"
+    assert st["halted"] is True
+    assert st["reason"] == "order_error_manual_check"
+    assert ex.orders == []  # 성공한 주문 없음
+
+
+def test_reconcile_halted_guard_skips_order():
+    """halted=True 상태에서 reconcile 호출 → 주문 없음, action=error, note=halted"""
+    ex = FakeEx()
+    st = {"halted": True, "reason": "prior_halt", "last_order_signal_bar_time": ""}
+    r = dx.reconcile(ex, target=1, usdt=10000, base_qty=0.0, price=60000,
+                     market=ex.markets["BTC/USDT"], bar_iso="b1", state=st,
+                     dry_run=False)
+    assert ex.orders == []
+    assert r["action"] == "error"
+    assert r.get("note") == "halted"
