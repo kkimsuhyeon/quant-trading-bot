@@ -27,7 +27,7 @@
 ## 판정 — gross에서 무엇이 진짜로 남았나
 ✅ **낙폭(MDD) 개선 = 진짜고 robust.** 추세 단독 대비 결합 MDD가 **net 4%(stress)에서도 4전략 전부 크게 얕아짐**(예: Donchian -44.8→-24.5, SMA -52.9→-29.4, Keltner -35.8→-25.2). haircut을 올려도 거의 안 무너진다 — 이건 **gross 환상이 아니라 무상관 sleeve가 주는 실제 리스크 분산**이다. (haircut은 캐리의 *수익*만 깎지 *낙폭 평탄화*는 거의 안 건드림.)
 
-🟡 **Sharpe 개선 = modest하고 haircut 민감.** net 2%(base)에선 4전략 중 3개(Keltner/Donchian/SMA)가 여전히 개선, Regime은 ~flat. **net 4%(stress)에선 전부 ~breakeven**(추세 단독과 비슷). 즉 위험대비 *수익* 개선은 gross가 보여준 것보다 얇고, 비용이 커지면 사라진다.
+🟡 **Sharpe 개선 = modest하고 haircut 민감.** net 2%(base)에선 4전략 중 3개(Keltner/Donchian/SMA)가 여전히 개선(+0.05~0.06), Regime은 ~flat(+0.01). **net 4%(stress)에선 전부 ~breakeven**(추세 단독과 비슷; Regime은 −0.02로 미세하게 아래 — 노이즈 수준). 즉 위험대비 *수익* 개선은 gross가 보여준 것보다 얇고, 비용이 커지면 사라진다.
 
 **결론:** 7c의 "MDD↓·Sharpe↑"는 net으로 보면 **"MDD↓는 진짜·견고, Sharpe↑는 modest·haircut 민감"**으로 갈린다. **무상관 엣지(캐리)를 더하면 *낙폭을 실제로 줄인다*는 게 net에서도 확인됨** = 7c가 "gross concept proof"에서 **"낙폭 분산은 실재"로 격상**. → **testnet에서 검증할 포트폴리오 후보**(추세 + net 캐리). 단 가중치는 미고정, Phase 4 후보 아님.
 
