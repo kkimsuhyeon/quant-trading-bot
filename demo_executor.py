@@ -8,6 +8,19 @@ from paper_trade import fetch_live, desired_position, _is_stale
 from strategies.keltner_breakout import KeltnerBreakout
 
 DEMO_BASE = os.environ.get("BINANCE_DEMO_BASE_URL", "https://demo-api.binance.com")
+
+
+def load_env(path=".env"):
+    """KEY=VALUE 파싱해서 os.environ에 setdefault로 주입 (이미 있는 값은 덮지 않음)."""
+    if not os.path.exists(path):
+        return
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
 STATE_PATH = "paper/demo_state.json"
 ORDERS_CSV = "paper/demo_orders.csv"
 LOCK_PATH = "paper/.demo_lock"
@@ -56,6 +69,8 @@ def reconcile(exchange, target, usdt, base_qty, price, market, bar_iso, state, d
                    "bar_iso": bar_iso, "dry_run": dry_run,
                    "action": "halted_skip", "order_id": "", "cost_or_qty": "", "note": "halted"})
         return {"action": "error", "note": "halted"}
+    if state.get("last_order_signal_bar_time") == bar_iso:
+        return {"action": "none", "note": "already_acted_this_bar"}
     min_notional = market["limits"]["cost"]["min"] or 10.0
     holding = is_holding(base_qty, price, min_notional)
     equity = usdt + base_qty * price
@@ -106,6 +121,7 @@ def reconcile(exchange, target, usdt, base_qty, price, market, bar_iso, state, d
 
 
 def make_exchange():
+    load_env()
     # 키 변수명: BINANCE_DEMO_* 우선, 기존 BINANCE_TESTNET_* 폴백(둘 다 허용). 둘 다 없으면 명시적 오류.
     key = os.environ.get("BINANCE_DEMO_API_KEY") or os.environ.get("BINANCE_TESTNET_API_KEY")
     sec = os.environ.get("BINANCE_DEMO_API_SECRET") or os.environ.get("BINANCE_TESTNET_API_SECRET")
@@ -155,22 +171,41 @@ def run_once(live=False, exchange=None, fetch=None, now=None):
         breach = update_high_water_and_breach(equity, state)
         if breach:                                    # 상태 먼저 저장 → 1회 청산
             state["halted"] = True; state["reason"] = f"drawdown<=-{int(DD_LIMIT*100)}%"
-            save_state(state)
-            if is_holding(base_qty, price, market["limits"]["cost"]["min"] or 0) and live:
-                exchange.create_market_sell_order(SYMBOL, float(exchange.amount_to_precision(SYMBOL, base_qty)))
+            if live:
+                save_state(state)
+                if is_holding(base_qty, price, market["limits"]["cost"]["min"] or 10.0):
+                    ks_base = {"run_at": pd.Timestamp.now(tz="UTC").isoformat(), "target": 0,
+                               "base_qty": base_qty, "price": price, "equity": equity,
+                               "bar_iso": "", "dry_run": False}
+                    log_order({**ks_base, "action": "kill_switch_intent", "order_id": "",
+                               "cost_or_qty": base_qty, "note": "drawdown_breach"})
+                    try:
+                        o = exchange.create_market_sell_order(
+                            SYMBOL, float(exchange.amount_to_precision(SYMBOL, base_qty)))
+                        log_order({**ks_base, "action": "kill_switch_sell",
+                                   "order_id": o.get("id"), "cost_or_qty": base_qty, "note": ""})
+                    except Exception:
+                        state["reason"] = "liquidation_failed_manual_check"
+                        save_state(state)
+                        log_order({**ks_base, "action": "order_error", "order_id": "",
+                                   "cost_or_qty": base_qty, "note": "kill_switch_sell_failed"})
+            else:
+                print(f"[demo] KILL-SWITCH would_halt (dry-run) — 상태 저장 생략")
             print("[demo] KILL-SWITCH 발동 — 청산+정지"); return {"halted": True}
 
         bar_iso = df.index[-1].isoformat()
         target = desired_position(df, KeltnerBreakout)
         res = reconcile(exchange, target, usdt, base_qty, price, market, bar_iso, state, dry_run=not live)
-        save_state(state)
+        if live:
+            save_state(state)
         print(f"[demo] target={target} action={res.get('action')} equity={equity:.2f} {'(dry-run)' if not live else ''}")
-        return {"target": target, **res, "halted": False}
+        return {"target": target, **res, "halted": state.get("halted", False)}
     finally:
         fcntl.flock(lock_file, fcntl.LOCK_UN); lock_file.close()
 
 
 if __name__ == "__main__":
+    load_env()
     live = "--live" in sys.argv
     if live:                                          # --live 전 demo 연결/키 검증
         ex = make_exchange()

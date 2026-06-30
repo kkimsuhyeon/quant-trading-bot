@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 from datetime import timedelta
 import pytest
 import pandas as pd
@@ -179,8 +181,10 @@ def test_run_once_skips_when_already_halted(tmp_path, monkeypatch):
     assert ex.orders == [] and r["halted"] is True     # halted면 신규진입 금지
 
 
-def test_run_once_kill_switch_dry_run_halts_without_order(tmp_path, monkeypatch):
-    # dry-run(live=False) 브리치: halted 저장은 되지만 실제 청산 주문은 안 나감
+# ── Fix A: dry-run 브리치 → halted 저장 안 함 ────────────────────────────────
+
+def test_run_once_kill_switch_dry_run_no_state_mutation(tmp_path, monkeypatch):
+    # dry-run(live=False) 브리치: demo_state.json의 halted는 False 유지 (side-effect-free), 주문도 없음
     monkeypatch.chdir(tmp_path)
     ex = FakeEx()
     ex.private_get_account = lambda: {"balances": [{"asset": "USDT", "free": "100"},
@@ -191,6 +195,86 @@ def test_run_once_kill_switch_dry_run_halts_without_order(tmp_path, monkeypatch)
     df = _df_uptrend()
     r = dx.run_once(live=False, exchange=ex, fetch=lambda **k: df,
                     now=df.index[-1] + timedelta(hours=4))
-    assert dx.load_state(dx.STATE_PATH)["halted"] is True   # 상태는 정지로 저장
-    assert ex.orders == []                                  # 단 dry-run이라 청산 주문 X
+    assert dx.load_state(dx.STATE_PATH)["halted"] is False  # dry-run: 상태 저장 안 함
+    assert ex.orders == []                                  # dry-run: 청산 주문 없음
+    assert r["halted"] is True                              # 반환값에는 would_halt 표시
+
+
+# ── Fix B: load_env ──────────────────────────────────────────────────────────
+
+def test_load_env_injects_keys(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("BINANCE_DEMO_API_KEY=mykey\nBINANCE_DEMO_API_SECRET=mysecret\n")
+    # os.environ을 격리해 clean-up 보장
+    monkeypatch.delenv("BINANCE_DEMO_API_KEY", raising=False)
+    monkeypatch.delenv("BINANCE_DEMO_API_SECRET", raising=False)
+    dx.load_env(str(env_file))
+    assert os.environ.get("BINANCE_DEMO_API_KEY") == "mykey"
+    assert os.environ.get("BINANCE_DEMO_API_SECRET") == "mysecret"
+
+
+def test_load_env_skips_blanks_and_comments(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("# 주석\n\nSOME_KEY=val\n")
+    monkeypatch.delenv("SOME_KEY", raising=False)
+    dx.load_env(str(env_file))
+    assert os.environ.get("SOME_KEY") == "val"
+
+
+def test_load_env_setdefault_does_not_overwrite(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("MY_VAR=from_file\n")
+    monkeypatch.setenv("MY_VAR", "already_set")
+    dx.load_env(str(env_file))
+    assert os.environ.get("MY_VAR") == "already_set"
+
+
+def test_load_env_missing_file_is_noop(tmp_path):
+    # 파일 없으면 조용히 무시
+    dx.load_env(str(tmp_path / "nonexistent.env"))  # exception 없어야 함
+
+
+# ── Fix C: kill-switch 청산 예외 처리 ────────────────────────────────────────
+
+def test_run_once_kill_switch_sell_exception_halts_gracefully(tmp_path, monkeypatch):
+    """kill-switch 발동 시 create_market_sell_order 예외 → halted=True, reason=liquidation_failed, 주문 미기록, 크래시 없음"""
+    monkeypatch.chdir(tmp_path)
+
+    class FakeExSellFail(FakeEx):
+        def create_market_sell_order(self, s, qty):
+            raise Exception("network_error")
+
+    ex = FakeExSellFail()
+    ex.private_get_account = lambda: {"balances": [{"asset": "USDT", "free": "100"},
+                                                   {"asset": "BTC", "free": "0.1"}]}
+    ex.load_markets = lambda: ex.markets
+    dx.save_state({"high_water": 12000.0, "halted": False, "reason": "",
+                   "last_order_signal_bar_time": ""}, dx.STATE_PATH)
+    df = _df_uptrend()
+    # 예외가 발생해도 크래시 없이 반환
+    r = dx.run_once(live=True, exchange=ex, fetch=lambda **k: df,
+                    now=df.index[-1] + timedelta(hours=4))
+    st = dx.load_state(dx.STATE_PATH)
+    assert st["halted"] is True
+    assert "liquidation_failed" in st["reason"]
     assert r["halted"] is True
+    # audit log에 kill_switch_intent 행이 기록돼야 함
+    import os as _os
+    assert _os.path.exists(dx.ORDERS_CSV)
+    import pandas as _pd
+    log = _pd.read_csv(dx.ORDERS_CSV)
+    assert "kill_switch_intent" in log["action"].values
+
+
+# ── Fix D: last_order_signal_bar_time 같은 봉 중복 가드 ──────────────────────
+
+def test_reconcile_same_bar_dedup_skips_order():
+    """state에 이미 해당 bar_iso가 기록돼 있으면 reconcile이 주문 없이 반환"""
+    ex = FakeEx()
+    st = {"last_order_signal_bar_time": "b1", "halted": False}
+    r = dx.reconcile(ex, target=1, usdt=10000, base_qty=0.0, price=60000,
+                     market=ex.markets["BTC/USDT"], bar_iso="b1", state=st,
+                     dry_run=False)
+    assert ex.orders == []
+    assert r["action"] == "none"
+    assert r.get("note") == "already_acted_this_bar"
