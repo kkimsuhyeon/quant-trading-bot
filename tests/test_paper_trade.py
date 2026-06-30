@@ -44,7 +44,7 @@ def test_params_repr_excludes_sentiment():
 
 
 def test_strategies_has_four():
-    assert set(STRATEGIES) == {"keltner", "regime", "donchian", "sma_stop"}
+    assert {"keltner", "regime", "donchian", "sma_stop"} <= set(STRATEGIES)
 
 
 def test_is_stale():
@@ -59,13 +59,13 @@ def test_append_signals_schema_and_idempotency(tmp_path):
     now = df.index[-1] + timedelta(hours=4)
     csv = str(tmp_path / "signals.csv")
     rows1 = _append_signals(df, csv_path=csv, now=now)
-    assert len(rows1) == 4                                  # 4전략
+    assert len(rows1) == 6                                  # 6전략(sentiment 변형 포함)
     saved = pd.read_csv(csv)
     assert list(saved.columns) == COLUMNS_EXPECTED
-    assert set(saved["strategy"]) == {"keltner", "regime", "donchian", "sma_stop"}
+    assert {"keltner", "regime", "donchian", "sma_stop"} <= set(saved["strategy"])
     rows2 = _append_signals(df, csv_path=csv, now=now)      # 같은 봉 재실행
     assert rows2 == []                                      # 멱등: 중복 skip
-    assert len(pd.read_csv(csv)) == 4                       # 행 수 그대로
+    assert len(pd.read_csv(csv)) == 6                       # 행 수 그대로
 
 
 def test_append_signals_dry_run_writes_nothing(tmp_path):
@@ -73,7 +73,7 @@ def test_append_signals_dry_run_writes_nothing(tmp_path):
     now = df.index[-1] + timedelta(hours=4)
     csv = str(tmp_path / "signals.csv")
     rows = _append_signals(df, csv_path=csv, now=now, dry_run=True)
-    assert len(rows) == 4
+    assert len(rows) == 6
     assert not os.path.exists(csv)
 
 
@@ -83,3 +83,31 @@ def test_append_signals_stale_skips(tmp_path):
     csv = str(tmp_path / "signals.csv")
     assert _append_signals(df, csv_path=csv, now=now) == []
     assert not os.path.exists(csv)
+
+
+def test_desired_position_sentiment_blocks_on_greed():
+    # 상승 추세 + 전 구간 극탐욕 → use_sentiment=True면 현금(0), False면 보유(1)
+    import pandas as pd
+    from paper_trade import desired_position, _to_live_df
+    n = 320
+    close = [100.0] * 220 + [100.0 + i for i in range(1, n - 220 + 1)]
+    rows = [[i * 14400000, c, c * 1.01, c * 0.99, c, 1000.0] for i, c in enumerate(close)]
+    df = _to_live_df(rows)
+    df["sentiment"] = 90.0                       # 전 구간 극탐욕(float)
+    from strategies.regime_filter import RegimeFilter
+    assert desired_position(df, RegimeFilter, use_sentiment=True) == 0
+    assert desired_position(df, RegimeFilter, use_sentiment=False) == 1
+
+
+def test_params_repr_includes_use_sentiment():
+    from paper_trade import _params_repr
+    from strategies.regime_filter import RegimeFilter
+    r = _params_repr(RegimeFilter, {"use_sentiment": True})
+    assert "use_sentiment=True" in r
+    assert "sentiment_threshold=75" in r          # 클래스 속성(int)도 포함
+
+
+def test_strategies_has_sentiment_variants():
+    from paper_trade import STRATEGIES
+    assert "regime_sentiment" in STRATEGIES and "keltner_sentiment" in STRATEGIES
+    assert STRATEGIES["regime_sentiment"][1] == {"use_sentiment": True}

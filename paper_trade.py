@@ -6,16 +6,19 @@ import pandas as pd
 import ccxt
 from backtest import run_backtest, _to_backtesting_format
 from fetch import clean_ohlcv
+from sentiment import fetch_fng, attach_fng
 from strategies.keltner_breakout import KeltnerBreakout
 from strategies.regime_filter import RegimeFilter
 from strategies.donchian_breakout import DonchianBreakout
 from strategies.sma_cross_stop import SmaCrossWithStop
 
 STRATEGIES = {
-    "keltner": KeltnerBreakout,
-    "regime": RegimeFilter,
-    "donchian": DonchianBreakout,
-    "sma_stop": SmaCrossWithStop,
+    "keltner": (KeltnerBreakout, {}),
+    "regime": (RegimeFilter, {}),
+    "donchian": (DonchianBreakout, {}),
+    "sma_stop": (SmaCrossWithStop, {}),
+    "keltner_sentiment": (KeltnerBreakout, {"use_sentiment": True}),
+    "regime_sentiment": (RegimeFilter, {"use_sentiment": True}),
 }
 SIGNALS_CSV = "paper/signals.csv"
 LOCK_PATH = "paper/.lock"
@@ -36,15 +39,17 @@ def fetch_live(symbol="BTC/USDT", timeframe="4h", limit=1000, exchange=None):
     return _to_live_df(rows)
 
 
-def desired_position(df, strategy):
-    _, stats = run_backtest(df, strategy)
+def desired_position(df, strategy, **params):
+    _, stats = run_backtest(df, strategy, **params)
     return int(stats._strategy.position.size > 0)
 
 
-def _params_repr(strategy):
+def _params_repr(strategy, params=None):
     items = {k: v for k, v in vars(strategy).items()
              if not k.startswith("_") and isinstance(v, (int, float)) and not isinstance(v, bool)}
-    return ",".join(f"{k}={v}" for k, v in sorted(items.items()))
+    if params:
+        items.update(params)
+    return ",".join(f"{k}={v}" for k, v in sorted(items.items(), key=lambda kv: kv[0]))
 
 
 def _is_stale(candle_time, now, timeframe="4h", max_bars=2):
@@ -70,16 +75,16 @@ def _append_signals(df, csv_path=SIGNALS_CSV, now=None, symbol="BTC/USDT",
     bar_iso = candle_time.isoformat()
     existing = _existing_keys(csv_path)
     rows = []
-    for name, strat in strategies.items():
+    for name, (strat, params) in strategies.items():
         if (name, symbol, timeframe, bar_iso) in existing:
             continue
         rows.append({
             "run_at": now.isoformat(), "symbol": symbol, "timeframe": timeframe,
             "strategy": name, "signal_bar_time": bar_iso,
             "signal_bar_close": float(df["Close"].iloc[-1]),
-            "desired_position": desired_position(df, strat),
+            "desired_position": desired_position(df, strat, **params),
             "source_rows": len(df), "lookback_bars": len(df),
-            "strategy_params": _params_repr(strat),
+            "strategy_params": _params_repr(strat, params),
         })
     summary = ", ".join(f"{r['strategy']}={r['desired_position']}" for r in rows) or "(중복 skip)"
     print(f"[paper] {bar_iso} close={float(df['Close'].iloc[-1]):.2f} | {summary}")
@@ -101,6 +106,12 @@ def run_once(dry_run=False, symbol="BTC/USDT", timeframe="4h", **kwargs):
         return []
     try:
         df = fetch_live(symbol=symbol, timeframe=timeframe, **kwargs)
+        try:
+            df = attach_fng(df, fetch_fng())               # D값 D+1부터(t-1 lag)
+        except Exception as e:
+            print(f"[paper] F&G fetch 실패 — sentiment off로 진행: {e}")
+            df = df.copy()
+            df["sentiment"] = float("nan")                 # numeric NaN = 필터 off
         return _append_signals(df, symbol=symbol, timeframe=timeframe, dry_run=dry_run)
     finally:
         fcntl.flock(lock_file, fcntl.LOCK_UN)
