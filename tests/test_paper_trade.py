@@ -113,3 +113,23 @@ def test_strategies_has_sentiment_variants():
     from paper_trade import STRATEGIES
     assert "regime_sentiment" in STRATEGIES and "keltner_sentiment" in STRATEGIES
     assert STRATEGIES["regime_sentiment"][1] == {"use_sentiment": True}
+
+
+def test_record_funding_dedups_per_symbol_and_time(tmp_path):
+    import pandas as pd
+    from paper_trade import record_funding
+
+    class FakeEx:
+        def fetch_funding_rate(self, symbol):
+            return {"symbol": symbol, "fundingRate": 0.0001, "fundingTimestamp": 1700000000000,
+                    "markPrice": 50000.0, "indexPrice": 50010.0, "timestamp": 1700000123000}
+
+    csv = str(tmp_path / "funding.csv")
+    now = pd.Timestamp("2026-06-30T00:00:00Z")
+    r1 = record_funding(symbols=("BTC/USDT:USDT", "ETH/USDT:USDT"), csv_path=csv, exchange=FakeEx(), now=now)
+    assert len(r1) == 2                                   # 두 심볼 기록
+    r2 = record_funding(symbols=("BTC/USDT:USDT", "ETH/USDT:USDT"), csv_path=csv, exchange=FakeEx(), now=now)
+    assert len(r2) == 0                                   # 같은 (symbol, funding_time) → 멱등 skip
+    d = pd.read_csv(csv)
+    assert set(d["symbol"]) == {"BTC/USDT:USDT", "ETH/USDT:USDT"}
+    assert "funding_time" in d.columns and "funding_rate" in d.columns

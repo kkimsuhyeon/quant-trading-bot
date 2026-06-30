@@ -95,6 +95,49 @@ def _append_signals(df, csv_path=SIGNALS_CSV, now=None, symbol="BTC/USDT",
     return rows
 
 
+FUNDING_CSV = "paper/funding.csv"
+FUNDING_COLUMNS = ["run_at", "exchange", "symbol", "funding_time", "funding_rate",
+                   "mark_price", "index_price", "raw_timestamp"]
+
+
+def _funding_keys(csv_path):
+    if not os.path.exists(csv_path):
+        return set()
+    d = pd.read_csv(csv_path, dtype=str)
+    return set(zip(d["symbol"], d["funding_time"]))
+
+
+def record_funding(symbols=("BTC/USDT:USDT", "ETH/USDT:USDT"), csv_path=FUNDING_CSV,
+                   exchange=None, now=None, dry_run=False):
+    exchange = exchange or ccxt.binance()
+    if now is None:
+        now = pd.Timestamp.now(tz="UTC")
+    existing = _funding_keys(csv_path)
+    rows = []
+    for sym in symbols:
+        try:
+            fr = exchange.fetch_funding_rate(sym)
+        except Exception as e:
+            print(f"[funding] {sym} fetch 실패 — skip: {e}")
+            continue
+        ft_ms = fr.get("fundingTimestamp") or (fr.get("info") or {}).get("nextFundingTime")
+        funding_time = pd.to_datetime(int(ft_ms), unit="ms", utc=True).isoformat() if ft_ms else ""
+        if (sym, funding_time) in existing:
+            continue
+        rows.append({
+            "run_at": now.isoformat(), "exchange": "binance", "symbol": sym,
+            "funding_time": funding_time, "funding_rate": fr.get("fundingRate"),
+            "mark_price": fr.get("markPrice"), "index_price": fr.get("indexPrice"),
+            "raw_timestamp": fr.get("timestamp"),
+        })
+    if rows and not dry_run:
+        os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
+        header = not os.path.exists(csv_path)
+        pd.DataFrame(rows, columns=FUNDING_COLUMNS).to_csv(csv_path, mode="a", header=header, index=False)
+    print(f"[funding] {len(rows)} 기록" + (" (dry-run)" if dry_run else ""))
+    return rows
+
+
 def run_once(dry_run=False, symbol="BTC/USDT", timeframe="4h", **kwargs):
     os.makedirs("paper", exist_ok=True)
     lock_file = open(LOCK_PATH, "w")
@@ -112,7 +155,12 @@ def run_once(dry_run=False, symbol="BTC/USDT", timeframe="4h", **kwargs):
             print(f"[paper] F&G fetch 실패 — sentiment off로 진행: {e}")
             df = df.copy()
             df["sentiment"] = float("nan")                 # numeric NaN = 필터 off
-        return _append_signals(df, symbol=symbol, timeframe=timeframe, dry_run=dry_run)
+        result = _append_signals(df, symbol=symbol, timeframe=timeframe, dry_run=dry_run)
+        try:
+            record_funding(dry_run=dry_run)
+        except Exception as e:
+            print(f"[funding] 기록 실패(무시): {e}")
+        return result
     finally:
         fcntl.flock(lock_file, fcntl.LOCK_UN)
         lock_file.close()
