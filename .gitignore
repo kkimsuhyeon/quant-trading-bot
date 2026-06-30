@@ -11,6 +11,8 @@ data/
 
 # Jupyter
 .ipynb_checkpoints/
+# 노트북 savefig byproduct (그림은 .ipynb에 inline으로 박힘 — 느슨한 PNG는 미커밋)
+research/*.png
 
 # 서브에이전트 진행 원장 (scratch)
 .superpowers/
