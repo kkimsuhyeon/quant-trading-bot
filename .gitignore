@@ -4,6 +4,10 @@ __pycache__/
 .venv/
 venv/
 
+# 비밀키/환경변수 (API 키 등 — 절대 커밋 금지)
+.env
+.env.*
+
 # 수집 데이터 (재현 가능 — fetch.py로 다시 받음, 커밋하지 않음)
 data/
 *.parquet
