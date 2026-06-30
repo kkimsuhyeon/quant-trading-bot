@@ -1,4 +1,6 @@
+import math
 import os
+from decimal import Decimal, ROUND_DOWN
 import sys
 import json
 import fcntl
@@ -106,7 +108,7 @@ def reconcile(exchange, target, usdt, base_qty, price, market, bar_iso, state, d
         log_order({**base, "action": "buy", "order_id": o.get("id"), "cost_or_qty": cost, "note": ""})
         return {"action": "buy", "order": o}
     else:                                            # 청산: base 전량 매도
-        qty = exchange.amount_to_precision(SYMBOL, base_qty)
+        qty = round_amount(base_qty, market.get("amount_step", 1e-5))
         log_order({**base, "action": "sell_intent", "order_id": "", "cost_or_qty": qty, "note": ""})
         try:
             o = exchange.create_market_sell_order(SYMBOL, float(qty))
@@ -134,6 +136,23 @@ def make_exchange():
     return ex
 
 
+def fetch_market_filters(exchange, symbol="BTCUSDT"):
+    info = exchange.public_get_exchangeinfo({"symbol": symbol})
+    fs = {f["filterType"]: f for f in info["symbols"][0]["filters"]}
+    notional = fs.get("NOTIONAL") or fs.get("MIN_NOTIONAL") or {}
+    lot = fs.get("LOT_SIZE", {})
+    min_notional = float(notional.get("minNotional") or notional.get("notional") or 10.0)
+    step = float(lot.get("stepSize") or 1e-5)
+    min_qty = float(lot.get("minQty") or 1e-5)
+    return {"limits": {"cost": {"min": min_notional}, "amount": {"min": min_qty}}, "amount_step": step}
+
+
+def round_amount(qty, step):
+    if not step or step <= 0:
+        return qty
+    return float(Decimal(str(qty)).quantize(Decimal(str(step)), rounding=ROUND_DOWN))
+
+
 def _balances(exchange):
     acct = exchange.private_get_account()             # demo는 /api/v3/account 사용(fetch_balance는 sapi라 X)
     b = {x["asset"]: float(x["free"]) for x in acct["balances"]}
@@ -150,8 +169,7 @@ def run_once(live=False, exchange=None, fetch=None, now=None):
     try:
         exchange = exchange or make_exchange()
         fetch = fetch or fetch_live
-        markets = exchange.load_markets()
-        market = markets[SYMBOL] if isinstance(markets, dict) and SYMBOL in markets else exchange.markets[SYMBOL]
+        market = fetch_market_filters(exchange)
         if now is None:
             now = pd.Timestamp.now(tz="UTC")
 
@@ -181,7 +199,7 @@ def run_once(live=False, exchange=None, fetch=None, now=None):
                                "cost_or_qty": base_qty, "note": "drawdown_breach"})
                     try:
                         o = exchange.create_market_sell_order(
-                            SYMBOL, float(exchange.amount_to_precision(SYMBOL, base_qty)))
+                            SYMBOL, round_amount(base_qty, market.get("amount_step", 1e-5)))
                         log_order({**ks_base, "action": "kill_switch_sell",
                                    "order_id": o.get("id"), "cost_or_qty": base_qty, "note": ""})
                     except Exception:

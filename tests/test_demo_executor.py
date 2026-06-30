@@ -51,9 +51,14 @@ def test_high_water_and_breach():
 
 class FakeEx:
     def __init__(self):
-        self.markets = {"BTC/USDT": {"limits": {"cost": {"min": 10}, "amount": {"min": 1e-5}}}}
+        self.markets = {"BTC/USDT": {"limits": {"cost": {"min": 10}, "amount": {"min": 1e-5}}, "amount_step": 1e-5}}
         self.orders = []
     def amount_to_precision(self, s, a): return round(a, 5)
+    def public_get_exchangeinfo(self, params=None):
+        return {"symbols": [{"filters": [
+            {"filterType": "NOTIONAL", "minNotional": "10.0"},
+            {"filterType": "LOT_SIZE", "stepSize": "0.00001", "minQty": "0.00001"},
+        ]}]}
     def create_market_buy_order_with_cost(self, s, cost):
         self.orders.append(("buy", cost)); return {"id": "1", "status": "closed"}
     def create_market_sell_order(self, s, qty):
@@ -278,3 +283,22 @@ def test_reconcile_same_bar_dedup_skips_order():
     assert ex.orders == []
     assert r["action"] == "none"
     assert r.get("note") == "already_acted_this_bar"
+
+
+# ── fetch_market_filters / round_amount 단위 테스트 ──────────────────────────
+
+def test_fetch_market_filters_parses_canned_response():
+    ex = FakeEx()
+    m = dx.fetch_market_filters(ex, symbol="BTCUSDT")
+    assert m["limits"]["cost"]["min"] == 10.0
+    assert m["limits"]["amount"]["min"] == 1e-5
+    assert m["amount_step"] == 1e-5
+
+
+def test_round_amount_floors_to_step():
+    assert dx.round_amount(0.123456, 1e-5) == pytest.approx(0.12345)
+    assert dx.round_amount(0.5, 1e-5) == pytest.approx(0.5)
+
+
+def test_round_amount_zero_step_passthrough():
+    assert dx.round_amount(0.123456, 0) == 0.123456
