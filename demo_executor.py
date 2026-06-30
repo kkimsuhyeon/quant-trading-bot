@@ -106,8 +106,12 @@ def reconcile(exchange, target, usdt, base_qty, price, market, bar_iso, state, d
 
 
 def make_exchange():
-    ex = ccxt.binance({"apiKey": os.environ.get("BINANCE_TESTNET_API_KEY"),
-                       "secret": os.environ.get("BINANCE_TESTNET_API_SECRET")})
+    # 키 변수명: BINANCE_DEMO_* 우선, 기존 BINANCE_TESTNET_* 폴백(둘 다 허용). 둘 다 없으면 명시적 오류.
+    key = os.environ.get("BINANCE_DEMO_API_KEY") or os.environ.get("BINANCE_TESTNET_API_KEY")
+    sec = os.environ.get("BINANCE_DEMO_API_SECRET") or os.environ.get("BINANCE_TESTNET_API_SECRET")
+    if not key or not sec:
+        raise RuntimeError("API 키 없음 — .env에 BINANCE_DEMO_API_KEY/SECRET (또는 BINANCE_TESTNET_*) 설정 필요")
+    ex = ccxt.binance({"apiKey": key, "secret": sec})
     for k in list(ex.urls["api"]):
         if isinstance(ex.urls["api"][k], str):
             ex.urls["api"][k] = ex.urls["api"][k].replace("https://api.binance.com", DEMO_BASE)

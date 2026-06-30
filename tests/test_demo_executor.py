@@ -177,3 +177,20 @@ def test_run_once_skips_when_already_halted(tmp_path, monkeypatch):
     r = dx.run_once(live=True, exchange=ex, fetch=lambda **k: df,
                     now=df.index[-1] + timedelta(hours=4))
     assert ex.orders == [] and r["halted"] is True     # halted면 신규진입 금지
+
+
+def test_run_once_kill_switch_dry_run_halts_without_order(tmp_path, monkeypatch):
+    # dry-run(live=False) 브리치: halted 저장은 되지만 실제 청산 주문은 안 나감
+    monkeypatch.chdir(tmp_path)
+    ex = FakeEx()
+    ex.private_get_account = lambda: {"balances": [{"asset": "USDT", "free": "100"},
+                                                   {"asset": "BTC", "free": "0.1"}]}
+    ex.load_markets = lambda: ex.markets
+    dx.save_state({"high_water": 12000.0, "halted": False, "reason": "",
+                   "last_order_signal_bar_time": ""}, dx.STATE_PATH)
+    df = _df_uptrend()
+    r = dx.run_once(live=False, exchange=ex, fetch=lambda **k: df,
+                    now=df.index[-1] + timedelta(hours=4))
+    assert dx.load_state(dx.STATE_PATH)["halted"] is True   # 상태는 정지로 저장
+    assert ex.orders == []                                  # 단 dry-run이라 청산 주문 X
+    assert r["halted"] is True
