@@ -29,14 +29,21 @@ run_once(live=False) -> dict                             # fetch_live → target
 
 ## 주요 결정 (기본값 — demo라 단순/안전 우선)
 - **주문**: 시장가(market). cron이 봉 마감 ~10분 뒤 실행 → 사실상 다음 봉 진입(백테스트 `trade_on_close=False`와 정합).
-- **사이즈**: 진입 시 가용 USDT의 **95%**(수수료/최소수량 버퍼), 청산 시 보유 base **전량**. (백테스트의 all-in/all-out과 정합. 고정 비율, 최적화 없음.)
-- **킬스위치**: equity(=USDT + base×가격) 고점 대비 **−15%** 도달 시 → **거래 정지 + 전량 청산 + 수동 리셋 요구**. 상태는 `paper/demo_state.json`.
+- **사이즈**: 진입 시 가용 USDT의 **95%**(수수료/최소수량 버퍼), 청산 시 보유 base **전량**. (백테스트 all-in/all-out과 정합, 고정 비율, 최적화 없음.)
+- **킬스위치**: equity(=USDT + base×가격) 고점 대비 **−15%** → 거래 정지 + 전량 청산 + 수동 리셋. 상태 `paper/demo_state.json`.
 - **대상**: Keltner 1개 · BTC/USDT 1종 · 현물 demo. (다전략/포트폴리오/선물 = 다음.)
-- **최소 주문**: 거래소 min-notional/lot 미만이면 skip + 경고(주문 거부 방지).
+
+## ★ Codex 안전 보강 (Critical — 첫 실주문이라 반드시 설계에 박음)
+1. **시장가 매수 = quote sizing 명시.** 가용 USDT×0.95를 `amount`로 넣으면 ccxt가 base 수량으로 오해할 수 있음 → **`quoteOrderQty`(cost 기반) 사용** + `load_markets()`의 precision/min-notional/min-qty로 반올림.
+2. **dust를 포지션으로 보지 않기.** `base>0`이 아니라 **`base×price ≥ min_notional`일 때만 실질 보유**로 판단. 미만은 dust → 기록+skip(전량매도 반복실패 방지).
+3. **주문 timeout/불명확 체결 = 중복 방지 상태.** create_order가 거래소엔 들어갔는데 클라가 timeout이면 다음 실행서 중복매수 위험 → `demo_state.json`에 **order intent/`last_order_signal_bar_time`** 저장. 결과 불명확하면 **자동 재주문 금지, `halted=manual_check_required`로 정지.**
+4. **킬스위치 순서 = 상태 먼저 저장, 청산 1회.** `staleness 통과 → equity 계산 → high-water 갱신 → −15% breach면 halted=true+reason 저장(먼저) → 보유분 1회 청산 → 수동 reset 전 신규진입 금지`. 청산도 timeout이면 pending/manual, 재진입 절대 금지.
+5. **엔드포인트 env+검증.** `BINANCE_DEMO_BASE_URL`(기본 demo-api.binance.com)로 빼고, **`--live` 시작 전 `fetch_balance()`가 demo에서 성공하는지 assert** → 키/엔드포인트 불일치면 주문 전 즉시 중단.
+- **감사 로그**: `paper/demo_orders.csv` append-only — 주문 *전* intent + 주문 *후* response/order-id + target/current/equity/price.
 
 ## 안전 / 테스트 (synthetic — ★라이브 주문 절대 안 냄)
-- 자동 테스트는 **fake exchange 주입**(네트워크/실주문 0): reconcile 로직(목표1+미보유→매수주문 1건 / 목표0+보유→매도 / 이미목표→무주문), 킬스위치 발동(고점−15%→halt+청산), 멱등을 **값으로 검증**.
-- 기본 `dry_run=True`. 실제 demo 주문은 사용자가 `--live`로 의도적으로만.
+- 자동 테스트는 **fake exchange 주입**(네트워크/실주문 0): reconcile(목표1+미보유→매수 1건[quoteOrderQty] / 목표0+보유→매도 / 이미목표→무주문 / dust→skip), 킬스위치(고점−15%→halted 저장 후 청산 1회·재진입 차단), 멱등·pending-order 중복방지를 **값으로 검증**.
+- 기본 `dry_run=True`. 실제 demo 주문은 사용자가 `--live`로 의도적으로만. `--live` 전 demo fetch_balance assert.
 - 단일 락·staleness 가드(paper_trade 패턴).
 
 ## 운영 (사용자 수동 절차)
@@ -50,4 +57,5 @@ run_once(live=False) -> dict                             # fetch_live → target
 
 ## 산출물
 - `demo_executor.py` + `tests/test_demo_executor.py`(synthetic, fake exchange)
+- 런타임 상태/로그(둘 다 `paper/`=gitignore): `demo_state.json`(high_water·halted·reason·last_order_signal_bar_time), `demo_orders.csv`(append-only 감사 로그)
 - 본 문서 + `docs/design/README.md` 인덱스 + `.env.example`(키 템플릿)
