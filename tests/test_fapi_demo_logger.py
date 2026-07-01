@@ -1,4 +1,5 @@
 import pytest
+import pandas as pd
 import fapi_demo_logger as fx
 
 
@@ -68,9 +69,6 @@ def test_make_fapi_exchange_requires_keys(monkeypatch):
     monkeypatch.setattr(fx, "load_env", lambda *a, **k: None)
     with pytest.raises(RuntimeError):
         fx.make_fapi_exchange()
-
-
-import pandas as pd
 
 
 class FakeFapi:
