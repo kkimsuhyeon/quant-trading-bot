@@ -47,3 +47,24 @@ def test_assert_demo_fapi_raises_on_mainnet_leak():
                  "fapiPrivateV2": "https://fapi.binance.com/fapi/v2"})  # ← 메인넷
     with pytest.raises(RuntimeError):
         fx._assert_demo_fapi(ex)
+
+
+def test_make_fapi_exchange_rewrites_urls_to_demo(monkeypatch):
+    monkeypatch.setenv("BINANCE_DEMO_API_KEY", "k")
+    monkeypatch.setenv("BINANCE_DEMO_API_SECRET", "s")
+    ex = fx.make_fapi_exchange()
+    fapi_urls = [u for k, u in ex.urls["api"].items()
+                 if isinstance(u, str) and "fapi" in k.lower()]
+    assert fapi_urls, "fapi url이 하나는 있어야 함"
+    assert all(fx.FAPI_DEMO_HOST in u for u in fapi_urls)  # 전부 demo-fapi
+
+
+def test_make_fapi_exchange_requires_keys(monkeypatch):
+    monkeypatch.delenv("BINANCE_DEMO_API_KEY", raising=False)
+    monkeypatch.delenv("BINANCE_DEMO_API_SECRET", raising=False)
+    monkeypatch.delenv("BINANCE_TESTNET_API_KEY", raising=False)
+    monkeypatch.delenv("BINANCE_TESTNET_API_SECRET", raising=False)
+    # .env를 읽지 못하게 존재하지 않는 경로로 load_env 대체
+    monkeypatch.setattr(fx, "load_env", lambda *a, **k: None)
+    with pytest.raises(RuntimeError):
+        fx.make_fapi_exchange()
