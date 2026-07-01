@@ -1,14 +1,6 @@
-import os
-import sys
-import time
-import fcntl
-import pandas as pd
-import ccxt
-from demo_executor import load_env
-
 FAPI_DEMO_HOST = "demo-fapi.binance.com"
 FAPI_MAINNET_HOST = "fapi.binance.com"
-SYMBOLS = [("BTCUSDT", "BTC/USDT"), ("ETHUSDT", "ETH/USDT")]  # (fapi심볼, 표시심볼)
+SYMBOLS = [("BTCUSDT", "BTC/USDT"), ("ETHUSDT", "ETH/USDT")]
 
 STATUS_CSV = "paper/fapi_demo_status.csv"
 PREMIUM_CSV = "paper/fapi_demo_premium.csv"
