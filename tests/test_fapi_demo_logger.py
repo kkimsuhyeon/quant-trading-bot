@@ -68,3 +68,77 @@ def test_make_fapi_exchange_requires_keys(monkeypatch):
     monkeypatch.setattr(fx, "load_env", lambda *a, **k: None)
     with pytest.raises(RuntimeError):
         fx.make_fapi_exchange()
+
+
+import pandas as pd
+
+
+class FakeFapi:
+    """읽기 전용 fake — 주문 메서드 없음(있으면 안 됨)."""
+    def __init__(self, fail=None):
+        self.fail = fail or set()          # {"account","positions","premium","time"}
+        self.urls = {"api": {"fapiPublic": "https://demo-fapi.binance.com/fapi/v1"}}
+    def fapiPublicGetTime(self):
+        if "time" in self.fail: raise Exception("time_timeout")
+        return {"serverTime": 1782910000000}
+    def fapiPrivateV2GetAccount(self):
+        if "account" in self.fail: raise Exception("auth_fail")
+        return {"totalWalletBalance": "10495.0", "availableBalance": "10490.0",
+                "canTrade": True, "updateTime": 1782910000000}
+    def fapiPrivateV2GetPositionRisk(self):
+        if "positions" in self.fail: raise Exception("pos_fail")
+        return [{"symbol": "BTCUSDT", "positionAmt": "0.0"}]
+    def fapiPublicGetPremiumIndex(self, params):
+        if "premium" in self.fail: raise Exception("prem_fail")
+        return {"markPrice": "58456.4", "indexPrice": "58460.0",
+                "lastFundingRate": "0.0001", "nextFundingTime": 1782921600000}
+
+
+def test_run_once_happy_path(tmp_path):
+    s = str(tmp_path / "status.csv"); p = str(tmp_path / "premium.csv")
+    ex = FakeFapi()
+    r = fx.run_once(exchange=ex, now=pd.Timestamp("2026-07-01T10:05:00Z"),
+                    status_csv=s, premium_csv=p)
+    assert r["status"]["auth_ok"] is True
+    assert r["status"]["positions_ok"] is True
+    assert r["status"]["premium_ok"] is True
+    assert r["status"]["n_open_positions"] == 0
+    assert r["status"]["wallet_balance"] == 10495.0
+    assert len(r["premium"]) == 2                       # BTC, ETH
+    sdf = pd.read_csv(s); pdf = pd.read_csv(p)
+    assert len(sdf) == 1 and len(pdf) == 2
+    assert list(sdf.columns) == fx.STATUS_COLS
+    assert list(pdf.columns) == fx.PREMIUM_COLS
+
+
+def test_run_once_partial_failure_still_writes_status(tmp_path):
+    s = str(tmp_path / "status.csv"); p = str(tmp_path / "premium.csv")
+    ex = FakeFapi(fail={"premium"})
+    r = fx.run_once(exchange=ex, now=pd.Timestamp("2026-07-01T10:05:00Z"),
+                    status_csv=s, premium_csv=p)
+    assert r["status"]["auth_ok"] is True               # account는 성공
+    assert r["status"]["premium_ok"] is False           # premium만 실패
+    assert "premium" in r["status"]["error"]
+    assert len(pd.read_csv(s)) == 1                      # status는 기록됨
+    import os
+    assert not os.path.exists(p)                         # premium 행 0 → 파일 미생성
+
+
+def test_run_once_auth_failure_recorded(tmp_path):
+    s = str(tmp_path / "status.csv"); p = str(tmp_path / "premium.csv")
+    ex = FakeFapi(fail={"account"})
+    r = fx.run_once(exchange=ex, now=pd.Timestamp("2026-07-01T10:05:00Z"),
+                    status_csv=s, premium_csv=p)
+    assert r["status"]["auth_ok"] is False
+    assert r["status"]["wallet_balance"] is None
+    assert "account" in r["status"]["error"]
+    assert len(pd.read_csv(s)) == 1
+
+
+def test_run_once_appends(tmp_path):
+    s = str(tmp_path / "status.csv"); p = str(tmp_path / "premium.csv")
+    ex = FakeFapi()
+    fx.run_once(exchange=ex, now=pd.Timestamp("2026-07-01T10:05:00Z"), status_csv=s, premium_csv=p)
+    fx.run_once(exchange=ex, now=pd.Timestamp("2026-07-01T11:05:00Z"), status_csv=s, premium_csv=p)
+    assert len(pd.read_csv(s)) == 2                      # append (헤더 중복 없음)
+    assert len(pd.read_csv(p)) == 4
