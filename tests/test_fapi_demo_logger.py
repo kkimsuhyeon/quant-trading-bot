@@ -140,3 +140,18 @@ def test_run_once_appends(tmp_path):
     fx.run_once(exchange=ex, now=pd.Timestamp("2026-07-01T11:05:00Z"), status_csv=s, premium_csv=p)
     assert len(pd.read_csv(s)) == 2                      # append (헤더 중복 없음)
     assert len(pd.read_csv(p)) == 4
+
+
+def test_run_once_asserts_demo_on_injected_mainnet_exchange(tmp_path):
+    """주입 경로도 mainnet fapi URL이면 assert가 막아야 함(방어심층)."""
+    ex = FakeFapi()
+    ex.urls = {"api": {"fapiPublic": "https://fapi.binance.com/fapi/v1"}}   # mainnet 유출
+    with pytest.raises(RuntimeError):
+        fx.run_once(exchange=ex, now=pd.Timestamp("2026-07-01T10:05:00Z"),
+                    status_csv=str(tmp_path / "s.csv"), premium_csv=str(tmp_path / "p.csv"))
+
+
+def test_count_open_positions_handles_empty_string():
+    raw = [{"symbol": "BTCUSDT", "positionAmt": ""},     # 빈 문자열 → 0 취급(ValueError 아님)
+           {"symbol": "ETHUSDT", "positionAmt": "1.5"}]
+    assert fx.count_open_positions(raw) == 1

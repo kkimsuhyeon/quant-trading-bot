@@ -30,7 +30,7 @@ def parse_account(raw):
 
 
 def count_open_positions(raw):
-    return sum(1 for p in raw if float(p.get("positionAmt", 0)) != 0)
+    return sum(1 for p in raw if float(p.get("positionAmt") or 0) != 0)
 
 
 def parse_premium(raw, symbol):
@@ -89,6 +89,7 @@ def run_once(exchange=None, now=None, status_csv=STATUS_CSV, premium_csv=PREMIUM
         print("[fapi] 다른 실행 중 — skip"); lock_file.close(); return {"skip": "lock"}
     try:
         exchange = exchange or make_fapi_exchange()
+        _assert_demo_fapi(exchange)              # 주입 경로도 mainnet 유출 차단(방어심층)
         if now is None:
             now = pd.Timestamp.now(tz="UTC")
         run_at = now.isoformat()
