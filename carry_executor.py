@@ -172,8 +172,10 @@ def open_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run):
     return {"action": "opened", "qty": spot_qty}
 
 
-def close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run, reason=""):
-    """청산: 위험 다리(선물 숏) 먼저 reduce-only → 현물 매도. 실패 시 halt, 재시도 금지."""
+def close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run, reason="",
+                final_phase="idle"):
+    """청산: 위험 다리(선물 숏) 먼저 reduce-only → 현물 매도. 실패 시 halt, 재시도 금지.
+    final_phase: 킬스위치 경로는 "halted_manual" — 청산 중 크래시가 나도 idle이 디스크에 남지 않게."""
     price = snap["price"]
     equity = compute_equity(snap["spot_usdt"], snap["spot_base"], price,
                             snap["fut"]["wallet"], snap["fut"]["upnl"])
@@ -223,8 +225,8 @@ def close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run, reason
         log_row({**base, "phase": "closing_spot", "action": "spot_sell",
                  "qty": qty, "order_id": o2.get("id"), "note": reason})
 
-    state["phase"] = "idle"; state["qty"] = 0.0; save_state(state)
-    log_row({**base, "phase": "idle", "action": "closed", "qty": 0, "order_id": "",
+    state["phase"] = final_phase; state["qty"] = 0.0; save_state(state)
+    log_row({**base, "phase": final_phase, "action": "closed", "qty": 0, "order_id": "",
              "note": reason})
     return {"action": "closed"}
 
@@ -280,11 +282,21 @@ def run_once(live=False, confirm_open=False, spot_ex=None, fut_ex=None):
             filled = abs(snap["perp_amt"])
             if filled == 0:                           # 숏도 사라짐 → 정합 체크로 진행
                 state["phase"] = "open"
+            elif abs(snap["spot_base"] - filled) * price < \
+                    (spot_mkt["limits"]["cost"]["min"] or 10.0):
+                # 현물 다리 이미 완성 (매수 체결 직후 크래시) → 재매수 금지 (중복 매수 방지)
+                state["phase"] = "open"; state["qty"] = filled
+                if live: save_state(state)
+                log_row({**base, "phase": "open", "action": "resumed_open",
+                         "qty": filled, "note": "already_hedged"})
+                return {"action": "resumed_open"}
             elif dry_run:
                 log_row({**base, "action": "resume_pending", "note": "opening_spot(dry)"})
                 return {"action": "resume_pending"}
             else:
                 qty = round_amount(filled, spot_mkt["amount_step"])
+                # 주문 *전에* 선저장 (opening_futures 폴스루로 왔으면 메모리 phase가 미저장 상태)
+                state["phase"] = "opening_spot"; state["qty"] = filled; save_state(state)
                 log_row({**base, "phase": "opening_spot", "action": "spot_buy_intent",
                          "qty": qty, "note": "resume"})
                 try:
@@ -325,10 +337,10 @@ def run_once(live=False, confirm_open=False, spot_ex=None, fut_ex=None):
                 reason = f"drawdown<=-{int(DD_LIMIT*100)}%" if breach else "margin_guard"
                 state["reason"] = reason
                 if live: save_state(state)            # 상태 먼저 저장 → 청산 1회
+                # final_phase로 halt 원자화 — 청산 성공 시에도 idle이 디스크에 안 남음
+                # (close_carry 실패 경로는 자체적으로 halted_manual 저장)
                 close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt,
-                            dry_run, reason=reason)
-                state["phase"] = "halted_manual"
-                if live: save_state(state)
+                            dry_run, reason=reason, final_phase="halted_manual")
                 print(f"[carry] KILL-SWITCH({reason}) — 청산+정지")
                 return {"action": "kill_switch", "reason": reason}
 
@@ -359,7 +371,7 @@ if __name__ == "__main__":
         print("[carry] --confirm-open은 --live와 함께만 유효 (dry-run으로 진행)")
     if live:                                          # 주문 전 양쪽 demo 연결/키 검증
         se = make_spot_exchange(); _assert_demo_spot(se); se.private_get_account()
-        fe = make_fapi_exchange(); fe.fapiPrivateV2GetAccount()
+        fe = make_fapi_exchange(); _assert_demo_fapi(fe); fe.fapiPrivateV2GetAccount()
         print("[carry] spot+fut demo 인증 확인됨 — LIVE 모드")
         run_once(live=True, confirm_open=confirm_open, spot_ex=se, fut_ex=fe)
     else:

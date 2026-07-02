@@ -491,3 +491,51 @@ def test_run_once_rejects_mainnet_injected_exchange():
     spot.urls = {"api": {"public": "https://api.binance.com/api"}}   # mainnet 주입 시도
     with pytest.raises(RuntimeError):
         ce.run_once(live=False, spot_ex=spot, fut_ex=FakeFut())
+
+
+# 리뷰 Important 3건 회귀 테스트
+
+def test_run_once_kill_switch_never_persists_idle(monkeypatch):
+    persisted = []
+    real_save = ce.save_state
+
+    def spy_save(state, path=ce.STATE_PATH):
+        persisted.append(state["phase"])                  # 디스크에 쓰인 phase 전부 기록
+        real_save(state, path)
+
+    monkeypatch.setattr(ce, "save_state", spy_save)
+    s = ce.load_state(); s["phase"] = "open"; s["qty"] = 0.05
+    s["high_water"] = 30000.0; real_save(s)
+    spot, fut = FakeSpot(usdt=13000.0, base=0.05), FakeFut(wallet=10000.0, upnl=-500.0,
+                                                            perp_amt=-0.05)
+    res = _run(spot, fut, live=True)
+    assert res["action"] == "kill_switch"
+    assert "idle" not in persisted                        # 킬스위치 중 idle이 디스크에 절대 안 남음
+    assert ce.load_state()["phase"] == "halted_manual"
+
+
+def test_run_once_resume_already_hedged_no_rebuy():
+    s = ce.load_state(); s["phase"] = "opening_spot"; s["qty"] = 0.05; ce.save_state(s)
+    spot, fut = FakeSpot(usdt=17000.0, base=0.05), FakeFut(perp_amt=-0.05)  # 양다리 이미 완성
+    res = _run(spot, fut, live=True)
+    assert res["action"] == "resumed_open"
+    assert spot.orders == [] and fut.orders == []         # 중복 매수 금지
+    assert ce.load_state()["phase"] == "open"
+
+
+def test_run_once_resume_persists_state_before_spot_order():
+    captured = {}
+
+    class SpySpot(FakeSpot):
+        def create_market_buy_order(self, symbol, qty):
+            captured["phase"] = ce.load_state()["phase"]  # 재개 매수 주문 시점의 디스크 상태
+            return super().create_market_buy_order(symbol, qty)
+
+    # opening_futures 폴스루로 진입 — 픽스 전에는 메모리 phase 변경이 미저장이라 디스크가
+    # opening_futures인 채 주문이 나감 (선저장 회귀를 실제로 잡는 셋업)
+    s = ce.load_state(); s["phase"] = "opening_futures"; s["qty"] = 0.05; ce.save_state(s)
+    spot, fut = SpySpot(base=0.0), FakeFut(perp_amt=-0.05)
+    res = _run(spot, fut, live=True)
+    assert res["action"] == "resumed_open"
+    assert captured["phase"] == "opening_spot"            # 주문 *전에* 선저장 (크래시 일관성)
+    assert ce.load_state()["phase"] == "open"
