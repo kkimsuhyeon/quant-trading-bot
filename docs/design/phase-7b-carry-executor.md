@@ -58,7 +58,9 @@ open → closing_futures → closing_spot → idle
 precheck: 양쪽 auth·잔고·canTrade·기존 포지션 0 확인. 하나라도 이상 → 진입 안 함
 notional = min(선물 availableBalance × 0.30, 현물 USDT × 0.95)   # 보수적 시작 (50%는 나중)
 1. 선물 숏 시장가 (opening_futures) → positionRisk로 실제 체결량 확인
-   실패 → 아무 일도 안 일어남 = 깨끗한 중단 (보상 불필요)
+   주문 예외 → **불명(unknown)으로 취급** (timeout이면 거래소엔 체결됐을 수 있음 — Codex).
+   phase는 opening_futures 유지, 다음 실행이 positionRisk로 해소: 숏 있음→현물 다리 이어감 /
+   숏 없음→idle 복귀 (그제서야 "깨끗한 중단" 확정)
 2. 확인된 숏 수량만큼 현물 매수 (opening_spot) → open
    실패/부분체결 → 즉시 선물 reduce-only 청산(보상 트랜잭션)
    보상도 실패 → halted_manual + naked_exposure=true + exposure 스냅샷 저장. 자동 재시도 금지
@@ -117,13 +119,15 @@ notional = min(선물 availableBalance × 0.30, 현물 USDT × 0.95)   # 보수�
 
 ⚠️ **선행 결정(첫 --live 전, 사용자와)**: 캐리는 Keltner demo 실행기와 **같은 현물 demo 계정·BTC를
 공유**한다. Keltner 청산 신호가 캐리의 현물 헷지를 전량 매도하면 naked 숏이 남는다(정합 체크가
-halt는 하지만 노출은 사람 개입 전까지 유지). → 캐리 --live 전에 ①별도 demo 서브계정/키 분리 또는
-②캐리 가동 기간 Keltner cron 중지 중 하나를 결정해야 한다.
+halt는 하지만 노출은 사람 개입 전까지 유지). → **운영 추천은 별도 spot demo 키/계정 분리**(Codex).
+분리가 불가능하면 캐리 가동 기간 Keltner cron **중지 필수**.
 
 1. 구현·리뷰·머지 후: dry-run으로 판단 로그 수 회 확인.
 2. **48h 게이트 통과 판정(사용자와 함께) 후** `--live --confirm-open`으로 첫 진입 1회.
    dry-run은 주문 경로에 도달하지 않으므로, 첫 진입 시 최소 수량 선물 주문이 실제로
    **demo-fapi에 도달하는지** 응답으로 확인하는 것까지가 검증이다.
+   첫 진입 전 체크: 선물 계정이 **one-way 포지션 모드**인지 확인(hedge mode에선 reduceOnly
+   전송 불가 — Binance USDⓈ-M New Order 스펙, Codex).
 3. 이후 cron 매시 **HH:15** (`:05` 로거·`:10` 실행기/섀도우와 분리, `cd <repo> &&` 접두어 필수):
    유지·킬스위치·정합 체크만 자동 (`--live`, confirm-open 없음 → 신규 진입은 절대 자동 안 됨).
 4. 로그: `paper/carry_state.json` + `paper/carry_orders.csv` + `paper/carry_cron.log` (전부 gitignore).
