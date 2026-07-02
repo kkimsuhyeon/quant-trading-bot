@@ -176,19 +176,16 @@ class FakeFut:
     def fapiPublicGetExchangeInfo(self, params):
         return FUT_INFO
 
-    def create_market_sell_order(self, symbol, qty):
-        if self.fail_sell:
-            raise RuntimeError("fut sell failed")
-        self.perp_amt -= qty
-        self.orders.append(("sell", qty, {}))
-        return {"id": f"f{len(self.orders)}"}
-
-    def create_market_buy_order(self, symbol, qty, params=None):
-        if self.fail_reduce:
-            raise RuntimeError("fut reduce failed")
-        self.perp_amt += qty
-        self.orders.append(("buy", qty, params or {}))
-        return {"id": f"f{len(self.orders)}"}
+    def fapiPrivatePostOrder(self, params):
+        if params["side"] == "SELL":
+            if self.fail_sell: raise RuntimeError("fut sell failed")
+            self.perp_amt -= params["quantity"]
+        else:
+            if self.fail_reduce: raise RuntimeError("fut reduce failed")
+            self.perp_amt += params["quantity"]
+        self.orders.append((params["side"].lower(), params["quantity"],
+                            {k: v for k, v in params.items() if k == "reduceOnly"}))
+        return {"orderId": f"f{len(self.orders)}"}
 
 
 def _snap(spot, fut):
@@ -254,7 +251,7 @@ def test_open_spot_fail_compensates_with_reduce_only():
     assert res["action"] == "compensated"
     # 숏 열림 → 현물 실패 → reduce-only 매수로 숏 닫힘
     assert fut.orders[0][0] == "sell"
-    assert fut.orders[1][0] == "buy" and fut.orders[1][2].get("reduceOnly") is True
+    assert fut.orders[1][0] == "buy" and fut.orders[1][2].get("reduceOnly") == "true"
     assert state["phase"] == "halted_manual"          # 보상 성공해도 halt (자동 재시도 금지)
     assert state["naked_exposure"] is False
 
@@ -263,9 +260,9 @@ def test_open_compensation_persists_state_before_order():
     captured = {}
 
     class SpyFut(FakeFut):
-        def create_market_buy_order(self, symbol, qty, params=None):
+        def fapiPrivatePostOrder(self, params):
             captured["phase"] = ce.load_state()["phase"]   # 보상 주문 시점의 디스크 상태
-            return super().create_market_buy_order(symbol, qty, params)
+            return super().fapiPrivatePostOrder(params)
 
     spot, fut = FakeSpot(fail_buy=True), SpyFut()
     state = ce.load_state()
@@ -305,7 +302,7 @@ def test_close_full_position_futures_first():
     res = ce.close_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt,
                          dry_run=False, reason="test")
     assert res["action"] == "closed"
-    assert fut.orders[0][0] == "buy" and fut.orders[0][2].get("reduceOnly") is True
+    assert fut.orders[0][0] == "buy" and fut.orders[0][2].get("reduceOnly") == "true"
     assert spot.orders == [("sell", 0.05)]            # 선물 먼저, 현물 나중
     assert state["phase"] == "idle" and state["qty"] == 0.0
 
@@ -339,7 +336,7 @@ def test_close_spot_fail_halts_benign():
     res = ce.close_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt,
                          dry_run=False)
     assert res["action"] == "error"
-    assert fut.orders[0][2].get("reduceOnly") is True # 선물은 이미 닫힘
+    assert fut.orders[0][2].get("reduceOnly") == "true" # 선물은 이미 닫힘
     assert state["phase"] == "halted_manual"
     assert state["naked_exposure"] is False           # 잔여 현물 롱 = 양성 노출
 
@@ -370,7 +367,7 @@ def test_close_futures_only_closes_reduce_only():
     spot_mkt, fut_mkt = _mkts()
     res = ce.close_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
     assert res["action"] == "closed"
-    assert fut.orders == [("buy", 0.05, {"reduceOnly": True})]
+    assert fut.orders == [("buy", 0.05, {"reduceOnly": "true"})]
     assert spot.orders == []                          # 팔 현물 없음
     assert state["phase"] == "idle" and state["qty"] == 0.0
 
@@ -379,9 +376,9 @@ def test_close_persists_state_before_each_order():
     captured = {}
 
     class SpyFut(FakeFut):
-        def create_market_buy_order(self, symbol, qty, params=None):
+        def fapiPrivatePostOrder(self, params):
             captured["fut_phase"] = ce.load_state()["phase"]   # 선물 청산 주문 시점의 디스크 상태
-            return super().create_market_buy_order(symbol, qty, params)
+            return super().fapiPrivatePostOrder(params)
 
     class SpySpot(FakeSpot):
         def create_market_sell_order(self, symbol, qty):
@@ -461,7 +458,7 @@ def test_run_once_dd_breach_closes_and_halts():
     # equity = 13000 + 3000 + 10000 - 500 = 25500 → 30000 대비 -15% < -10% → 발동
     res = _run(spot, fut, live=True)
     assert res["action"] == "kill_switch"
-    assert fut.orders[0][2].get("reduceOnly") is True # 청산 실행됨
+    assert fut.orders[0][2].get("reduceOnly") == "true" # 청산 실행됨
     assert spot.orders[0][0] == "sell"
     st = ce.load_state()
     assert st["phase"] == "halted_manual" and "drawdown" in st["reason"]
@@ -501,7 +498,7 @@ def test_run_once_resume_closing_continues_close():
     res = _run(spot, fut, live=True)
     assert res["action"] == "closed"
     assert spot.orders == [("sell", 0.05)]
-    assert ce.load_state()["phase"] == "idle"
+    assert ce.load_state()["phase"] == "halted_manual"     # 재개 청산은 원인불명 → halt 종결
 
 
 def test_run_once_rejects_mainnet_injected_exchange():

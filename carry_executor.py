@@ -129,14 +129,15 @@ def open_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run):
     log_row({**base, "phase": "opening_futures", "action": "fut_sell_intent", "qty": qty,
              "order_id": "", "note": ""})
     try:
-        o = fut_ex.create_market_sell_order(SYMBOL, qty)
+        o = fut_ex.fapiPrivatePostOrder({"symbol": FUT_SYMBOL, "side": "SELL",
+                                         "type": "MARKET", "quantity": qty})
     except Exception as e:
         state["phase"] = "idle"; state["qty"] = 0.0; save_state(state)   # 아무 일도 안 일어남
         log_row({**base, "phase": "idle", "action": "aborted_futures", "qty": qty,
                  "order_id": "", "note": f"{type(e).__name__}"})
         return {"action": "aborted_futures"}
     log_row({**base, "phase": "opening_futures", "action": "fut_sell", "qty": qty,
-             "order_id": o.get("id"), "note": ""})
+             "order_id": o.get("orderId"), "note": ""})
 
     # 실제 체결량 확인 → 그 수량으로 현물 매수
     filled = abs(perp_position_amt(fut_ex.fapiPrivateV2GetPositionRisk({"symbol": FUT_SYMBOL})))
@@ -154,11 +155,13 @@ def open_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run):
         log_row({**base, "phase": "opening_spot", "action": "compensate_intent", "qty": filled,
                  "order_id": "", "note": f"spot_buy_failed:{type(e).__name__}"})
         try:
-            oc = fut_ex.create_market_buy_order(SYMBOL, filled, {"reduceOnly": True})
+            oc = fut_ex.fapiPrivatePostOrder({"symbol": FUT_SYMBOL, "side": "BUY",
+                                              "type": "MARKET", "quantity": filled,
+                                              "reduceOnly": "true"})
             state["reason"] = "spot_failed_compensated"
             state["qty"] = 0.0; save_state(state)
             log_row({**base, "phase": "halted_manual", "action": "compensated", "qty": filled,
-                     "order_id": oc.get("id"), "note": ""})
+                     "order_id": oc.get("orderId"), "note": ""})
             return {"action": "compensated"}
         except Exception as e2:
             state["phase"] = "halted_manual"; state["reason"] = "spot_failed_compensation_failed"
@@ -199,7 +202,9 @@ def close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run, reason
         log_row({**base, "phase": "closing_futures", "action": "fut_close_intent",
                  "qty": short_qty, "order_id": "", "note": reason})
         try:
-            o = fut_ex.create_market_buy_order(SYMBOL, short_qty, {"reduceOnly": True})
+            o = fut_ex.fapiPrivatePostOrder({"symbol": FUT_SYMBOL, "side": "BUY",
+                                             "type": "MARKET", "quantity": short_qty,
+                                             "reduceOnly": "true"})
         except Exception as e:
             state["phase"] = "halted_manual"; state["reason"] = "close_futures_failed"
             save_state(state)
@@ -207,7 +212,7 @@ def close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run, reason
                      "order_id": "", "note": f"fut_close_failed:{type(e).__name__}"})
             return {"action": "error", "note": "close_futures_failed"}
         log_row({**base, "phase": "closing_futures", "action": "fut_close",
-                 "qty": short_qty, "order_id": o.get("id"), "note": reason})
+                 "qty": short_qty, "order_id": o.get("orderId"), "note": reason})
 
     # 다리 2: 현물 매도 (실패해도 잔여 롱은 양성 — halt만)
     if spot_holding:
@@ -295,7 +300,7 @@ def run_once(live=False, confirm_open=False, spot_ex=None, fut_ex=None):
                 log_row({**base, "action": "resume_pending", "note": "opening_spot(dry)"})
                 return {"action": "resume_pending"}
             else:
-                qty = round_amount(filled, spot_mkt["amount_step"])
+                qty = round_amount(filled - snap["spot_base"], spot_mkt["amount_step"])
                 # 주문 *전에* 선저장 (opening_futures 폴스루로 왔으면 메모리 phase가 미저장 상태)
                 state["phase"] = "opening_spot"; state["qty"] = filled; save_state(state)
                 log_row({**base, "phase": "opening_spot", "action": "spot_buy_intent",
@@ -314,8 +319,9 @@ def run_once(live=False, confirm_open=False, spot_ex=None, fut_ex=None):
                 return {"action": "resumed_open"}
 
         if state["phase"] in ("closing_futures", "closing_spot"):
+            # 청산 도중 크래시 = 원인 불명 → 재개 완료해도 halt (불확실하면 halt, 수동확인)
             res = close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt,
-                              dry_run, reason="resume_close")
+                              dry_run, reason="resume_close", final_phase="halted_manual")
             return {"action": res["action"]}
 
         # 2) 포지션 존재 시 건강 체크 (정합 → DD → margin)
