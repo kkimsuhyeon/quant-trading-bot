@@ -36,5 +36,5 @@
 | 7c | 추세+캐리 2-엣지 포트폴리오 (개념검증) | 구현 완료 (4전략 전부 MDD↓·Sharpe↑ — 단 gross 과장, concept proof) | [phase-7c-portfolio-combine.md](phase-7c-portfolio-combine.md) |
 | 7b-v2 | 캐리 net 타당성 (비용·haircut 후 엣지 잔존) | 구현 완료 (✅통과 — net 양수, 상관~0 유지 → testnet 후보. 단 tail 모델밖) | [phase-7b-v2-carry-net.md](phase-7b-v2-carry-net.md) |
 | 7c-v2 | 추세+캐리 결합 net 재검증 (gross 환상 걷어내기) | 구현 완료 (MDD↓는 net에서도 진짜·견고 / Sharpe↑는 modest·haircut 민감 → testnet 포트 후보) | [phase-7c-v2-net-combine.md](phase-7c-v2-net-combine.md) |
-| 7b-live-prep | 선물 demo 안정성 로거 (실행기 전 read-only 검증) | 설계 완료 (demo-fapi unblock 확인 → 48h 클린 게이트 후 캐리 실행기) | [phase-7b-live-prep-fapi-logger.md](phase-7b-live-prep-fapi-logger.md) |
+| 7b-live-prep | 선물 demo 안정성 로거 (실행기 전 read-only 검증) | 구현 완료 (cron HH:05 가동 — 48h 클린 게이트 관찰 중, 통과 시 캐리 실행기) | [phase-7b-live-prep-fapi-logger.md](phase-7b-live-prep-fapi-logger.md) |
 | 7b+ | 확장 (선물 롱/숏·레버리지) | 예정 | — |
