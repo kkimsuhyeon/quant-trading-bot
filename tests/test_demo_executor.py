@@ -7,6 +7,12 @@ import pandas as pd
 import demo_executor as dx
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    """모든 demo 테스트를 tmp CWD로 격리 — reconcile/log_order가 실제 paper/demo_orders.csv를 오염시키지 않도록."""
+    monkeypatch.chdir(tmp_path)
+
+
 def _df_uptrend():
     """Keltner 롱 신호를 유발하는 상승추세 4h df (UTC timezone-aware DatetimeIndex)"""
     n = 200
