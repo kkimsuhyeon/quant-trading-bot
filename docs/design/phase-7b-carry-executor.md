@@ -75,7 +75,12 @@ notional = min(선물 availableBalance × 0.30, 현물 USDT × 0.95)   # 보수�
   현물 매도 실패 → 잔여 현물 롱은 양성(청산 위험 없음) → halted_manual만, 재시도 금지
 현물만 존재(선물 없음) → 바로 현물 매도
 선물만 존재(naked short) → reduce-only 청산이 최우선
+크래시 후 closing_* 재개 → 청산은 이어가되 halted_manual로 종결 (중단 원인 불명 → 수동 확인)
 ```
+
+- **선물 주문은 implicit fapi 엔드포인트(`fapiPrivatePostOrder`)로만** 낸다 — ccxt unified
+  주문("BTC/USDT")은 현물 마켓으로 해석돼 mainnet 현물 URL로 라우팅됨(최종 리뷰에서 확정).
+  implicit 경로만 `_assert_demo_fapi`가 실제로 커버한다.
 
 ## 리스크 관리 (2층 킬스위치 + 정합 체크 — 매 실행 자동)
 
@@ -110,8 +115,15 @@ notional = min(선물 availableBalance × 0.30, 현물 USDT × 0.95)   # 보수�
 
 ## 운영
 
+⚠️ **선행 결정(첫 --live 전, 사용자와)**: 캐리는 Keltner demo 실행기와 **같은 현물 demo 계정·BTC를
+공유**한다. Keltner 청산 신호가 캐리의 현물 헷지를 전량 매도하면 naked 숏이 남는다(정합 체크가
+halt는 하지만 노출은 사람 개입 전까지 유지). → 캐리 --live 전에 ①별도 demo 서브계정/키 분리 또는
+②캐리 가동 기간 Keltner cron 중지 중 하나를 결정해야 한다.
+
 1. 구현·리뷰·머지 후: dry-run으로 판단 로그 수 회 확인.
 2. **48h 게이트 통과 판정(사용자와 함께) 후** `--live --confirm-open`으로 첫 진입 1회.
+   dry-run은 주문 경로에 도달하지 않으므로, 첫 진입 시 최소 수량 선물 주문이 실제로
+   **demo-fapi에 도달하는지** 응답으로 확인하는 것까지가 검증이다.
 3. 이후 cron 매시 **HH:15** (`:05` 로거·`:10` 실행기/섀도우와 분리, `cd <repo> &&` 접두어 필수):
    유지·킬스위치·정합 체크만 자동 (`--live`, confirm-open 없음 → 신규 진입은 절대 자동 안 됨).
 4. 로그: `paper/carry_state.json` + `paper/carry_orders.csv` + `paper/carry_cron.log` (전부 gitignore).
