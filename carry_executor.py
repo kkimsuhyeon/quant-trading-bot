@@ -97,7 +97,7 @@ def _now_iso():
 
 def open_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run):
     """진입: 선물 숏 먼저(불안정한 다리) → 체결량 확인 → 동수량 현물 매수.
-    실패 처리: 선물 실패=깨끗한 중단 / 현물 실패=선물 reduce-only 보상 / 보상 실패=naked halt."""
+    실패 처리: 선물 실패=상태 미상(다음 run_once 재개 로직이 해소) / 현물 실패=선물 reduce-only 보상 / 보상 실패=naked halt."""
     price = snap["price"]
     equity = compute_equity(snap["spot_usdt"], snap["spot_base"], price,
                             snap["fut"]["wallet"], snap["fut"]["upnl"])
@@ -132,10 +132,12 @@ def open_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run):
         o = fut_ex.fapiPrivatePostOrder({"symbol": FUT_SYMBOL, "side": "SELL",
                                          "type": "MARKET", "quantity": qty})
     except Exception as e:
-        state["phase"] = "idle"; state["qty"] = 0.0; save_state(state)   # 아무 일도 안 일어남
-        log_row({**base, "phase": "idle", "action": "aborted_futures", "qty": qty,
+        # 타임아웃 등으로 실제 거래소엔 체결됐을 수 있음 — phase/qty는 건드리지 않는다
+        # (디스크는 이미 주문 전 선저장으로 opening_futures — 다음 run_once의 opening_futures
+        # 재개 로직이 숏 존재 여부로 그대로 해소: 있으면 현물 다리 진행, 없으면 idle 리셋)
+        log_row({**base, "phase": "opening_futures", "action": "futures_order_unknown", "qty": qty,
                  "order_id": "", "note": f"{type(e).__name__}"})
-        return {"action": "aborted_futures"}
+        return {"action": "futures_order_unknown"}
     log_row({**base, "phase": "opening_futures", "action": "fut_sell", "qty": qty,
              "order_id": o.get("orderId"), "note": ""})
 
@@ -274,6 +276,15 @@ def run_once(live=False, confirm_open=False, spot_ex=None, fut_ex=None):
             log_row({**base, "action": "halted", "note": state.get("reason", "")})
             print(f"[carry] HALTED({state.get('reason')}) — 수동 리셋 필요")
             return {"action": "halted", "reason": state.get("reason")}
+
+        # 0b) 예기치 못한 롱 퍼프 = 이 엔진의 상태공간(숏-only) 밖 — abs()로 헷지처럼
+        # 보이면 안 됨. 탐지+halt만, 자동 청산/보정 없음.
+        if snap["perp_amt"] > 0:
+            state["phase"] = "halted_manual"; state["reason"] = "unexpected_long_perp"
+            if live: save_state(state)
+            log_row({**base, "phase": "halted_manual", "action": "halted",
+                     "note": "unexpected_long_perp"})
+            return {"action": "halted", "reason": "unexpected_long_perp"}
 
         # 1) 크래시 재개 (직전 실행이 중간 phase에서 죽음)
         if state["phase"] == "opening_futures":

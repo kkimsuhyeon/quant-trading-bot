@@ -155,12 +155,13 @@ class FakeSpot:
 
 class FakeFut:
     def __init__(self, wallet=10000.0, available=10000.0, upnl=0.0, perp_amt=0.0,
-                 fail_sell=False, fail_reduce=False):
+                 fail_sell=False, fail_reduce=False, fill_on_fail=False):
         self.urls = {"api": {"fapiPublic": "https://demo-fapi.binance.com/fapi",
                              "fapiPrivate": "https://demo-fapi.binance.com/fapi"}}
         self.wallet, self.available, self.upnl = wallet, available, upnl
         self.perp_amt = perp_amt
         self.fail_sell, self.fail_reduce = fail_sell, fail_reduce
+        self.fill_on_fail = fill_on_fail                  # 타임아웃인데 실제론 체결됐던 경우 시뮬
         self.orders = []
 
     def fapiPrivateV2GetAccount(self):
@@ -178,7 +179,10 @@ class FakeFut:
 
     def fapiPrivatePostOrder(self, params):
         if params["side"] == "SELL":
-            if self.fail_sell: raise RuntimeError("fut sell failed")
+            if self.fail_sell:
+                if self.fill_on_fail:                      # 타임아웃 응답만 못 받았을 뿐 체결은 됨
+                    self.perp_amt -= params["quantity"]
+                raise RuntimeError("fut sell failed")
             self.perp_amt -= params["quantity"]
         else:
             if self.fail_reduce: raise RuntimeError("fut reduce failed")
@@ -232,15 +236,29 @@ def test_open_skips_if_position_exists():
     assert fut.orders == [] and spot.orders == []
 
 
-def test_open_futures_fail_clean_abort():
+def test_open_futures_fail_leaves_opening_futures_for_next_run():
     spot, fut = FakeSpot(), FakeFut(fail_sell=True)
     state = ce.load_state()
     spot_mkt, fut_mkt = _mkts()
     res = ce.open_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
-    assert res["action"] == "aborted_futures"
+    assert res["action"] == "futures_order_unknown"
     assert spot.orders == []                          # 현물은 손도 안 댐
-    assert state["phase"] == "idle"                   # 깨끗한 중단
-    assert state["naked_exposure"] is False
+    assert ce.load_state()["phase"] == "opening_futures"  # 재개가 다음 run에서 해소 (idle 아님)
+
+
+def test_open_futures_timeout_actually_filled_resumes_to_open():
+    # 클라이언트는 예외를 봤지만 거래소엔 숏이 실제로 체결된 케이스 (네트워크 타임아웃)
+    spot, fut = FakeSpot(), FakeFut(fail_sell=True, fill_on_fail=True)
+    state = ce.load_state()
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.open_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
+    assert res["action"] == "futures_order_unknown"
+
+    # 다음 run_once가 재스냅샷하면 숏이 보임 → 현물 다리로 이어서 완료
+    res2 = ce.run_once(live=True, spot_ex=spot, fut_ex=fut)
+    assert res2["action"] == "resumed_open"
+    assert spot.orders == [("buy", 0.05)]
+    assert ce.load_state()["phase"] == "open"
 
 
 def test_open_spot_fail_compensates_with_reduce_only():
@@ -554,3 +572,14 @@ def test_run_once_resume_persists_state_before_spot_order():
     assert res["action"] == "resumed_open"
     assert captured["phase"] == "opening_spot"            # 주문 *전에* 선저장 (크래시 일관성)
     assert ce.load_state()["phase"] == "open"
+
+
+def test_run_once_unexpected_long_perp_halts():
+    # abs(perp_amt)로만 보면 롱도 헷지처럼 보일 수 있음 — 이 엔진은 숏-only 상태공간이라 halt
+    s = ce.load_state(); s["phase"] = "open"; s["qty"] = 0.05; ce.save_state(s)
+    spot, fut = FakeSpot(usdt=17000.0, base=0.05), FakeFut(perp_amt=0.05)
+    res = _run(spot, fut, live=True)
+    assert res["action"] == "halted"
+    assert res["reason"] == "unexpected_long_perp"
+    assert fut.orders == [] and spot.orders == []
+    assert ce.load_state()["phase"] == "halted_manual"
