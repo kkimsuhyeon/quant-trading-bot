@@ -241,6 +241,23 @@ def test_open_spot_fail_compensates_with_reduce_only():
     assert state["naked_exposure"] is False
 
 
+def test_open_compensation_persists_state_before_order():
+    captured = {}
+
+    class SpyFut(FakeFut):
+        def create_market_buy_order(self, symbol, qty, params=None):
+            captured["phase"] = ce.load_state()["phase"]   # 보상 주문 시점의 디스크 상태
+            return super().create_market_buy_order(symbol, qty, params)
+
+    spot, fut = FakeSpot(fail_buy=True), SpyFut()
+    state = ce.load_state()
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.open_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
+    assert res["action"] == "compensated"
+    assert captured["phase"] == "halted_manual"       # 보상 주문 *전에* 선저장 (크래시 일관성)
+    assert ce.load_state()["reason"] == "spot_failed_compensated"
+
+
 def test_open_compensation_fail_naked_halt():
     spot, fut = FakeSpot(fail_buy=True), FakeFut(fail_reduce=True)
     state = ce.load_state()

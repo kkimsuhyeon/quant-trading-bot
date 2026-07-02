@@ -147,11 +147,14 @@ def open_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run):
         o2 = spot_ex.create_market_buy_order(SYMBOL, spot_qty)
     except Exception as e:
         # 다리 2 실패 → 보상: 선물 reduce-only 청산. 성공해도 halt (자동 재시도 금지 — Codex)
+        # 보상 주문 *전에* 선저장 — 크래시 시 디스크가 halted_manual+compensating이라 사람이 확인
+        state["phase"] = "halted_manual"; state["reason"] = "spot_failed_compensating"
+        save_state(state)
         log_row({**base, "phase": "opening_spot", "action": "compensate_intent", "qty": filled,
                  "order_id": "", "note": f"spot_buy_failed:{type(e).__name__}"})
         try:
             oc = fut_ex.create_market_buy_order(SYMBOL, filled, {"reduceOnly": True})
-            state["phase"] = "halted_manual"; state["reason"] = "spot_failed_compensated"
+            state["reason"] = "spot_failed_compensated"
             state["qty"] = 0.0; save_state(state)
             log_row({**base, "phase": "halted_manual", "action": "compensated", "qty": filled,
                      "order_id": oc.get("id"), "note": ""})
