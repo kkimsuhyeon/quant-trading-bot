@@ -170,3 +170,60 @@ def open_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run):
     log_row({**base, "phase": "open", "action": "opened", "qty": spot_qty,
              "order_id": o2.get("id"), "note": ""})
     return {"action": "opened", "qty": spot_qty}
+
+
+def close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run, reason=""):
+    """청산: 위험 다리(선물 숏) 먼저 reduce-only → 현물 매도. 실패 시 halt, 재시도 금지."""
+    price = snap["price"]
+    equity = compute_equity(snap["spot_usdt"], snap["spot_base"], price,
+                            snap["fut"]["wallet"], snap["fut"]["upnl"])
+    base = {"run_at": _now_iso(), "phase": state["phase"], "price": price,
+            "equity": equity, "dry_run": dry_run}
+    spot_min = spot_mkt["limits"]["cost"]["min"] or 10.0
+    short_qty = abs(snap["perp_amt"])
+    spot_holding = snap["spot_base"] * price >= spot_min
+
+    if dry_run:
+        if short_qty or spot_holding:
+            log_row({**base, "action": "would_close", "qty": short_qty or snap["spot_base"],
+                     "order_id": "", "note": reason or "dry_run"})
+            return {"action": "would_close"}
+        return {"action": "none"}
+
+    # 다리 1: 선물 숏 존재 → reduce-only 청산 먼저 (위험 다리 제거)
+    if short_qty:
+        state["phase"] = "closing_futures"; save_state(state)
+        log_row({**base, "phase": "closing_futures", "action": "fut_close_intent",
+                 "qty": short_qty, "order_id": "", "note": reason})
+        try:
+            o = fut_ex.create_market_buy_order(SYMBOL, short_qty, {"reduceOnly": True})
+        except Exception as e:
+            state["phase"] = "halted_manual"; state["reason"] = "close_futures_failed"
+            save_state(state)
+            log_row({**base, "phase": "halted_manual", "action": "error", "qty": short_qty,
+                     "order_id": "", "note": f"fut_close_failed:{type(e).__name__}"})
+            return {"action": "error", "note": "close_futures_failed"}
+        log_row({**base, "phase": "closing_futures", "action": "fut_close",
+                 "qty": short_qty, "order_id": o.get("id"), "note": reason})
+
+    # 다리 2: 현물 매도 (실패해도 잔여 롱은 양성 — halt만)
+    if spot_holding:
+        qty = round_amount(snap["spot_base"], spot_mkt["amount_step"])
+        state["phase"] = "closing_spot"; save_state(state)
+        log_row({**base, "phase": "closing_spot", "action": "spot_sell_intent",
+                 "qty": qty, "order_id": "", "note": reason})
+        try:
+            o2 = spot_ex.create_market_sell_order(SYMBOL, qty)
+        except Exception as e:
+            state["phase"] = "halted_manual"; state["reason"] = "close_spot_failed"
+            save_state(state)
+            log_row({**base, "phase": "halted_manual", "action": "error", "qty": qty,
+                     "order_id": "", "note": f"spot_sell_failed:{type(e).__name__}"})
+            return {"action": "error", "note": "close_spot_failed"}
+        log_row({**base, "phase": "closing_spot", "action": "spot_sell",
+                 "qty": qty, "order_id": o2.get("id"), "note": reason})
+
+    state["phase"] = "idle"; state["qty"] = 0.0; save_state(state)
+    log_row({**base, "phase": "idle", "action": "closed", "qty": 0, "order_id": "",
+             "note": reason})
+    return {"action": "closed"}

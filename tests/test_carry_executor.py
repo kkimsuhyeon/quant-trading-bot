@@ -276,3 +276,71 @@ def test_open_below_min_notional_skips():
     res = ce.open_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
     assert res["action"] == "skip"
     assert fut.orders == [] and spot.orders == []
+
+
+# Task 3: close_carry 청산 테스트
+
+def test_close_full_position_futures_first():
+    spot, fut = FakeSpot(usdt=17000.0, base=0.05), FakeFut(perp_amt=-0.05)
+    state = ce.load_state(); state["phase"] = "open"; state["qty"] = 0.05
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.close_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt,
+                         dry_run=False, reason="test")
+    assert res["action"] == "closed"
+    assert fut.orders[0][0] == "buy" and fut.orders[0][2].get("reduceOnly") is True
+    assert spot.orders == [("sell", 0.05)]            # 선물 먼저, 현물 나중
+    assert state["phase"] == "idle" and state["qty"] == 0.0
+
+
+def test_close_spot_only_sells_immediately():
+    spot, fut = FakeSpot(usdt=17000.0, base=0.05), FakeFut(perp_amt=0.0)
+    state = ce.load_state(); state["phase"] = "open"; state["qty"] = 0.05
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.close_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt,
+                         dry_run=False)
+    assert res["action"] == "closed"
+    assert fut.orders == []                           # 선물 없음 → 건너뜀
+    assert spot.orders == [("sell", 0.05)]
+
+
+def test_close_futures_fail_halts_before_spot():
+    spot, fut = FakeSpot(usdt=17000.0, base=0.05), FakeFut(perp_amt=-0.05, fail_reduce=True)
+    state = ce.load_state(); state["phase"] = "open"
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.close_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt,
+                         dry_run=False)
+    assert res["action"] == "error"
+    assert spot.orders == []                          # 현물은 손대지 않음 (헷지 유지)
+    assert state["phase"] == "halted_manual"
+
+
+def test_close_spot_fail_halts_benign():
+    spot, fut = FakeSpot(usdt=17000.0, base=0.05, fail_sell=True), FakeFut(perp_amt=-0.05)
+    state = ce.load_state(); state["phase"] = "open"
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.close_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt,
+                         dry_run=False)
+    assert res["action"] == "error"
+    assert fut.orders[0][2].get("reduceOnly") is True # 선물은 이미 닫힘
+    assert state["phase"] == "halted_manual"
+    assert state["naked_exposure"] is False           # 잔여 현물 롱 = 양성 노출
+
+
+def test_close_dry_run_no_orders():
+    spot, fut = FakeSpot(base=0.05), FakeFut(perp_amt=-0.05)
+    state = ce.load_state(); state["phase"] = "open"
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.close_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt,
+                         dry_run=True)
+    assert res["action"] == "would_close"
+    assert fut.orders == [] and spot.orders == []
+
+
+def test_close_nothing_to_close():
+    spot, fut = FakeSpot(), FakeFut()
+    state = ce.load_state(); state["phase"] = "open"
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.close_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt,
+                         dry_run=False)
+    assert res["action"] == "closed"                  # 둘 다 없음 → 즉시 idle 복귀
+    assert state["phase"] == "idle"
