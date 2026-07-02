@@ -378,3 +378,116 @@ def test_close_persists_state_before_each_order():
     assert captured["fut_phase"] == "closing_futures"  # 주문 *전에* 선저장 (크래시 일관성)
     assert captured["spot_phase"] == "closing_spot"
     assert state["phase"] == "idle"
+
+
+# Task 4: run_once 오케스트레이션 테스트
+
+def _run(spot, fut, live=False, confirm_open=False):
+    return ce.run_once(live=live, confirm_open=confirm_open, spot_ex=spot, fut_ex=fut)
+
+
+def test_run_once_idle_without_confirm_does_nothing():
+    spot, fut = FakeSpot(), FakeFut()
+    res = _run(spot, fut, live=True, confirm_open=False)
+    assert res["action"] == "none"
+    assert fut.orders == [] and spot.orders == []
+
+
+def test_run_once_idle_confirm_open_opens():
+    spot, fut = FakeSpot(), FakeFut()
+    res = _run(spot, fut, live=True, confirm_open=True)
+    assert res["action"] == "opened"
+    assert ce.load_state()["phase"] == "open"
+
+
+def test_run_once_dry_run_never_orders():
+    spot, fut = FakeSpot(), FakeFut()
+    res = _run(spot, fut, live=False, confirm_open=True)
+    assert res["action"] == "would_open"
+    assert fut.orders == [] and spot.orders == []
+    assert ce.load_state()["phase"] == "idle"
+
+
+def test_run_once_halted_blocks_everything():
+    s = ce.load_state(); s["phase"] = "halted_manual"; s["reason"] = "x"; ce.save_state(s)
+    spot, fut = FakeSpot(), FakeFut(perp_amt=-0.05)
+    res = _run(spot, fut, live=True, confirm_open=True)
+    assert res["action"] == "halted"
+    assert fut.orders == [] and spot.orders == []
+
+
+def test_run_once_open_healthy_noop():
+    s = ce.load_state(); s["phase"] = "open"; s["qty"] = 0.05; ce.save_state(s)
+    spot, fut = FakeSpot(usdt=17000.0, base=0.05), FakeFut(perp_amt=-0.05)
+    res = _run(spot, fut, live=True)
+    assert res["action"] == "none"
+    assert fut.orders == [] and spot.orders == []
+    assert ce.load_state()["phase"] == "open"
+
+
+def test_run_once_leg_mismatch_halts_without_orders():
+    s = ce.load_state(); s["phase"] = "open"; s["qty"] = 0.05; ce.save_state(s)
+    spot, fut = FakeSpot(usdt=17000.0, base=0.02), FakeFut(perp_amt=-0.05)   # 0.03 어긋남
+    res = _run(spot, fut, live=True)
+    assert res["action"] == "halted"
+    assert fut.orders == [] and spot.orders == []     # 자동 보정 금지 (Codex)
+    st = ce.load_state()
+    assert st["phase"] == "halted_manual" and st["reason"] == "leg_mismatch"
+
+
+def test_run_once_dd_breach_closes_and_halts():
+    s = ce.load_state(); s["phase"] = "open"; s["qty"] = 0.05
+    s["high_water"] = 30000.0; ce.save_state(s)       # equity ≈ 17000+3000+10000=30000 근처
+    spot, fut = FakeSpot(usdt=13000.0, base=0.05), FakeFut(wallet=10000.0, upnl=-500.0,
+                                                            perp_amt=-0.05)
+    # equity = 13000 + 3000 + 10000 - 500 = 25500 → 30000 대비 -15% < -10% → 발동
+    res = _run(spot, fut, live=True)
+    assert res["action"] == "kill_switch"
+    assert fut.orders[0][2].get("reduceOnly") is True # 청산 실행됨
+    assert spot.orders[0][0] == "sell"
+    st = ce.load_state()
+    assert st["phase"] == "halted_manual" and "drawdown" in st["reason"]
+
+
+def test_run_once_margin_guard_closes_and_halts():
+    s = ce.load_state(); s["phase"] = "open"; s["qty"] = 0.05; ce.save_state(s)
+    spot, fut = FakeSpot(usdt=17000.0, base=0.05), FakeFut(wallet=10000.0, available=4000.0,
+                                                            perp_amt=-0.05)   # 0.4 < 0.5
+    res = _run(spot, fut, live=True)
+    assert res["action"] == "kill_switch"
+    st = ce.load_state()
+    assert st["phase"] == "halted_manual" and st["reason"] == "margin_guard"
+
+
+def test_run_once_resume_opening_futures_no_short_resets_idle():
+    s = ce.load_state(); s["phase"] = "opening_futures"; s["qty"] = 0.05; ce.save_state(s)
+    spot, fut = FakeSpot(), FakeFut(perp_amt=0.0)     # 숏 안 열렸음 = 아무 일 없음
+    res = _run(spot, fut, live=True)
+    assert res["action"] == "reset_idle"
+    assert ce.load_state()["phase"] == "idle"
+    assert fut.orders == [] and spot.orders == []
+
+
+def test_run_once_resume_opening_spot_completes_hedge():
+    s = ce.load_state(); s["phase"] = "opening_spot"; s["qty"] = 0.05; ce.save_state(s)
+    spot, fut = FakeSpot(), FakeFut(perp_amt=-0.05)   # 숏만 있고 현물 없음
+    res = _run(spot, fut, live=True)
+    assert res["action"] == "resumed_open"
+    assert spot.orders == [("buy", 0.05)]             # 헷지 완성 (노출 축소라 자동 허용)
+    assert ce.load_state()["phase"] == "open"
+
+
+def test_run_once_resume_closing_continues_close():
+    s = ce.load_state(); s["phase"] = "closing_spot"; s["qty"] = 0.05; ce.save_state(s)
+    spot, fut = FakeSpot(usdt=17000.0, base=0.05), FakeFut(perp_amt=0.0)  # 선물은 이미 닫힘
+    res = _run(spot, fut, live=True)
+    assert res["action"] == "closed"
+    assert spot.orders == [("sell", 0.05)]
+    assert ce.load_state()["phase"] == "idle"
+
+
+def test_run_once_rejects_mainnet_injected_exchange():
+    spot = FakeSpot()
+    spot.urls = {"api": {"public": "https://api.binance.com/api"}}   # mainnet 주입 시도
+    with pytest.raises(RuntimeError):
+        ce.run_once(live=False, spot_ex=spot, fut_ex=FakeFut())

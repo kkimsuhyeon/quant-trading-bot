@@ -227,3 +227,140 @@ def close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run, reason
     log_row({**base, "phase": "idle", "action": "closed", "qty": 0, "order_id": "",
              "note": reason})
     return {"action": "closed"}
+
+
+def _snapshot(spot_ex, fut_ex):
+    usdt, base = _balances(spot_ex)
+    fut = parse_fut_account(fut_ex.fapiPrivateV2GetAccount())
+    perp = perp_position_amt(fut_ex.fapiPrivateV2GetPositionRisk({"symbol": FUT_SYMBOL}))
+    price = float(fut_ex.fapiPublicGetPremiumIndex({"symbol": FUT_SYMBOL})["markPrice"])
+    return {"spot_usdt": usdt, "spot_base": base, "price": price, "fut": fut,
+            "perp_amt": perp}
+
+
+def run_once(live=False, confirm_open=False, spot_ex=None, fut_ex=None):
+    os.makedirs("paper", exist_ok=True)
+    lock_file = open(LOCK_PATH, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("[carry] 다른 실행 중 — skip"); lock_file.close(); return {"skip": "lock"}
+    try:
+        spot_ex = spot_ex or make_spot_exchange()
+        fut_ex = fut_ex or make_fapi_exchange()
+        _assert_demo_spot(spot_ex); _assert_demo_fapi(fut_ex)   # 주입 경로도 차단(방어심층)
+        spot_mkt = fetch_market_filters(spot_ex)
+        fut_mkt = fetch_fut_filters(fut_ex)
+        snap = _snapshot(spot_ex, fut_ex)
+        state = load_state()
+        dry_run = not live
+        price = snap["price"]
+        equity = compute_equity(snap["spot_usdt"], snap["spot_base"], price,
+                                snap["fut"]["wallet"], snap["fut"]["upnl"])
+        base = {"run_at": _now_iso(), "phase": state["phase"], "price": price,
+                "equity": equity, "dry_run": dry_run, "qty": state.get("qty", 0.0),
+                "order_id": ""}
+
+        # 0) halted → 수동 리셋 전 아무것도 안 함
+        if state["phase"] == "halted_manual":
+            log_row({**base, "action": "halted", "note": state.get("reason", "")})
+            print(f"[carry] HALTED({state.get('reason')}) — 수동 리셋 필요")
+            return {"action": "halted", "reason": state.get("reason")}
+
+        # 1) 크래시 재개 (직전 실행이 중간 phase에서 죽음)
+        if state["phase"] == "opening_futures":
+            if abs(snap["perp_amt"]) == 0:            # 숏 안 열림 → 깨끗한 초기화
+                state["phase"] = "idle"; state["qty"] = 0.0
+                if live: save_state(state)
+                log_row({**base, "phase": "idle", "action": "reset_idle", "note": "resume"})
+                return {"action": "reset_idle"}
+            state["phase"] = "opening_spot"           # 숏 확인됨 → 현물 다리 이어서
+
+        if state["phase"] == "opening_spot":
+            filled = abs(snap["perp_amt"])
+            if filled == 0:                           # 숏도 사라짐 → 정합 체크로 진행
+                state["phase"] = "open"
+            elif dry_run:
+                log_row({**base, "action": "resume_pending", "note": "opening_spot(dry)"})
+                return {"action": "resume_pending"}
+            else:
+                qty = round_amount(filled, spot_mkt["amount_step"])
+                log_row({**base, "phase": "opening_spot", "action": "spot_buy_intent",
+                         "qty": qty, "note": "resume"})
+                try:
+                    o = spot_ex.create_market_buy_order(SYMBOL, qty)
+                except Exception as e:
+                    state["phase"] = "halted_manual"; state["reason"] = "resume_spot_failed"
+                    save_state(state)
+                    log_row({**base, "phase": "halted_manual", "action": "error",
+                             "qty": qty, "note": f"resume:{type(e).__name__}"})
+                    return {"action": "error"}
+                state["phase"] = "open"; state["qty"] = filled; save_state(state)
+                log_row({**base, "phase": "open", "action": "resumed_open", "qty": qty,
+                         "order_id": o.get("id"), "note": "resume"})
+                return {"action": "resumed_open"}
+
+        if state["phase"] in ("closing_futures", "closing_spot"):
+            res = close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt,
+                              dry_run, reason="resume_close")
+            return {"action": res["action"]}
+
+        # 2) 포지션 존재 시 건강 체크 (정합 → DD → margin)
+        has_legs = abs(snap["perp_amt"]) > 0 or \
+            snap["spot_base"] * price >= (spot_mkt["limits"]["cost"]["min"] or 10.0)
+        if state["phase"] == "open" or has_legs:
+            fut_min = fut_mkt["limits"]["cost"]["min"] or 100.0
+            if leg_mismatch(snap["spot_base"], snap["perp_amt"], price,
+                            max(spot_mkt["limits"]["cost"]["min"] or 10.0, fut_min)):
+                state["phase"] = "halted_manual"; state["reason"] = "leg_mismatch"
+                if live: save_state(state)            # 자동 보정 금지 — 탐지+정지만
+                log_row({**base, "phase": "halted_manual", "action": "halted",
+                         "note": "leg_mismatch"})
+                print("[carry] LEG MISMATCH — halt, 수동확인 필요")
+                return {"action": "halted", "reason": "leg_mismatch"}
+
+            breach = update_high_water_and_breach(equity, state, dd_limit=DD_LIMIT)
+            guard = margin_breach(snap["fut"]["available"], snap["fut"]["wallet"])
+            if breach or guard:
+                reason = f"drawdown<=-{int(DD_LIMIT*100)}%" if breach else "margin_guard"
+                state["reason"] = reason
+                if live: save_state(state)            # 상태 먼저 저장 → 청산 1회
+                close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt,
+                            dry_run, reason=reason)
+                state["phase"] = "halted_manual"
+                if live: save_state(state)
+                print(f"[carry] KILL-SWITCH({reason}) — 청산+정지")
+                return {"action": "kill_switch", "reason": reason}
+
+        # 3) idle → 신규 진입은 live+confirm_open일 때만 (dry는 would_open 로그)
+        if state["phase"] == "idle":
+            if confirm_open:
+                res = open_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run)
+                return {"action": res["action"]}
+            log_row({**base, "action": "none", "note": "no_confirm_open"})
+            if live: save_state(state)                # high_water 등 유지
+            return {"action": "none"}
+
+        # 4) open & healthy → 무주문 (감사 로그만)
+        log_row({**base, "action": "none", "note": "healthy"})
+        if live: save_state(state)
+        print(f"[carry] phase={state['phase']} equity={equity:.2f} "
+              f"{'(dry-run)' if dry_run else ''}")
+        return {"action": "none", "phase": state["phase"]}
+    finally:
+        fcntl.flock(lock_file, fcntl.LOCK_UN); lock_file.close()
+
+
+if __name__ == "__main__":
+    load_env()
+    live = "--live" in sys.argv
+    confirm_open = "--confirm-open" in sys.argv
+    if confirm_open and not live:
+        print("[carry] --confirm-open은 --live와 함께만 유효 (dry-run으로 진행)")
+    if live:                                          # 주문 전 양쪽 demo 연결/키 검증
+        se = make_spot_exchange(); _assert_demo_spot(se); se.private_get_account()
+        fe = make_fapi_exchange(); fe.fapiPrivateV2GetAccount()
+        print("[carry] spot+fut demo 인증 확인됨 — LIVE 모드")
+        run_once(live=True, confirm_open=confirm_open, spot_ex=se, fut_ex=fe)
+    else:
+        run_once(live=False, confirm_open=confirm_open)
