@@ -344,3 +344,37 @@ def test_close_nothing_to_close():
                          dry_run=False)
     assert res["action"] == "closed"                  # 둘 다 없음 → 즉시 idle 복귀
     assert state["phase"] == "idle"
+
+
+def test_close_futures_only_closes_reduce_only():
+    spot, fut = FakeSpot(usdt=20000.0, base=0.0), FakeFut(perp_amt=-0.05)   # 현물 다리 없음
+    state = ce.load_state(); state["phase"] = "open"; state["qty"] = 0.05
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.close_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
+    assert res["action"] == "closed"
+    assert fut.orders == [("buy", 0.05, {"reduceOnly": True})]
+    assert spot.orders == []                          # 팔 현물 없음
+    assert state["phase"] == "idle" and state["qty"] == 0.0
+
+
+def test_close_persists_state_before_each_order():
+    captured = {}
+
+    class SpyFut(FakeFut):
+        def create_market_buy_order(self, symbol, qty, params=None):
+            captured["fut_phase"] = ce.load_state()["phase"]   # 선물 청산 주문 시점의 디스크 상태
+            return super().create_market_buy_order(symbol, qty, params)
+
+    class SpySpot(FakeSpot):
+        def create_market_sell_order(self, symbol, qty):
+            captured["spot_phase"] = ce.load_state()["phase"]  # 현물 매도 주문 시점의 디스크 상태
+            return super().create_market_sell_order(symbol, qty)
+
+    spot, fut = SpySpot(usdt=17000.0, base=0.05), SpyFut(perp_amt=-0.05)
+    state = ce.load_state(); state["phase"] = "open"; state["qty"] = 0.05
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.close_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
+    assert res["action"] == "closed"
+    assert captured["fut_phase"] == "closing_futures"  # 주문 *전에* 선저장 (크래시 일관성)
+    assert captured["spot_phase"] == "closing_spot"
+    assert state["phase"] == "idle"
