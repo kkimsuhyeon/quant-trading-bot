@@ -82,6 +82,24 @@ def test_assert_demo_spot_passes_on_demo():
     ce._assert_demo_spot(Ex())                        # no raise
 
 
+def test_assert_demo_spot_ignores_dapi_fapi_hosts():
+    # 실제 ccxt binance urls["api"]에는 dapi/fapi도 들어있음 — dapi.binance.com이
+    # "api.binance.com"을 부분문자열로 포함해도 오탐하면 안 됨 (실환경 dry-run 발견)
+    class Ex:
+        urls = {"api": {"public": "https://demo-api.binance.com/api",
+                        "sapi": "https://demo-api.binance.com/sapi/v1",
+                        "dapiPublic": "https://dapi.binance.com/dapi/v1",
+                        "fapiPublic": "https://fapi.binance.com/fapi/v1"}}
+    ce._assert_demo_spot(Ex())                        # no raise (fapi 가드는 _assert_demo_fapi 몫)
+
+
+def test_assert_demo_spot_raises_on_mainnet_sapi():
+    class Ex:
+        urls = {"api": {"sapi": "https://api.binance.com/sapi/v1"}}
+    with pytest.raises(RuntimeError):
+        ce._assert_demo_spot(Ex())
+
+
 def test_fetch_fut_filters():
     class Ex:
         def fapiPublicGetExchangeInfo(self, params):

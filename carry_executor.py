@@ -8,7 +8,6 @@ from demo_executor import (load_env, make_exchange as make_spot_exchange,
                            update_high_water_and_breach)
 from fapi_demo_logger import make_fapi_exchange, _assert_demo_fapi
 
-SPOT_DEMO_HOST = "demo-api.binance.com"
 STATE_PATH = "paper/carry_state.json"
 ORDERS_CSV = "paper/carry_orders.csv"
 LOCK_PATH = "paper/.carry_lock"
@@ -75,8 +74,10 @@ def perp_position_amt(raw, symbol=FUT_SYMBOL):
 
 
 def _assert_demo_spot(exchange):
+    # 호스트 경계 매칭: dapi.binance.com이 "api.binance.com"을 부분문자열로 포함해 오탐 →
+    # "//api.binance.com"으로 스팟 mainnet 호스트만 정확히 잡는다 (demo-api/dapi/fapi는 불일치)
     for k, u in exchange.urls["api"].items():
-        if isinstance(u, str) and "api.binance.com" in u and SPOT_DEMO_HOST not in u:
+        if isinstance(u, str) and "//api.binance.com" in u:
             raise RuntimeError(f"mainnet leak guard: {k}={u} (demo-api 아님)")
 
 
