@@ -92,3 +92,170 @@ def test_fetch_fut_filters():
     m = ce.fetch_fut_filters(Ex())
     assert m["limits"]["cost"]["min"] == 100.0
     assert m["amount_step"] == 0.001
+
+
+# Task 2: open_carry 진입 테스트용 헬퍼 및 Fake 거래소
+
+PRICE = 60000.0
+
+SPOT_INFO = {"symbols": [{"filters": [
+    {"filterType": "LOT_SIZE", "stepSize": "0.00001", "minQty": "0.00001"},
+    {"filterType": "NOTIONAL", "minNotional": "10"}]}]}
+FUT_INFO = {"symbols": [{"filters": [
+    {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+    {"filterType": "MIN_NOTIONAL", "notional": "100"}]}]}
+
+
+class FakeSpot:
+    def __init__(self, usdt=20000.0, base=0.0, fail_buy=False, fail_sell=False):
+        self.urls = {"api": {"public": "https://demo-api.binance.com/api"}}
+        self.usdt, self.base = usdt, base
+        self.fail_buy, self.fail_sell = fail_buy, fail_sell
+        self.orders = []
+
+    def private_get_account(self):
+        return {"balances": [{"asset": "USDT", "free": str(self.usdt)},
+                             {"asset": "BTC", "free": str(self.base)}]}
+
+    def public_get_exchangeinfo(self, params):
+        return SPOT_INFO
+
+    def create_market_buy_order(self, symbol, qty):
+        if self.fail_buy:
+            raise RuntimeError("spot buy failed")
+        self.base += qty; self.usdt -= qty * PRICE
+        self.orders.append(("buy", qty))
+        return {"id": f"s{len(self.orders)}"}
+
+    def create_market_sell_order(self, symbol, qty):
+        if self.fail_sell:
+            raise RuntimeError("spot sell failed")
+        self.base -= qty; self.usdt += qty * PRICE
+        self.orders.append(("sell", qty))
+        return {"id": f"s{len(self.orders)}"}
+
+
+class FakeFut:
+    def __init__(self, wallet=10000.0, available=10000.0, upnl=0.0, perp_amt=0.0,
+                 fail_sell=False, fail_reduce=False):
+        self.urls = {"api": {"fapiPublic": "https://demo-fapi.binance.com/fapi",
+                             "fapiPrivate": "https://demo-fapi.binance.com/fapi"}}
+        self.wallet, self.available, self.upnl = wallet, available, upnl
+        self.perp_amt = perp_amt
+        self.fail_sell, self.fail_reduce = fail_sell, fail_reduce
+        self.orders = []
+
+    def fapiPrivateV2GetAccount(self):
+        return {"totalWalletBalance": str(self.wallet), "availableBalance": str(self.available),
+                "totalUnrealizedProfit": str(self.upnl), "canTrade": True}
+
+    def fapiPrivateV2GetPositionRisk(self, params=None):
+        return [{"symbol": "BTCUSDT", "positionAmt": str(self.perp_amt)}]
+
+    def fapiPublicGetPremiumIndex(self, params):
+        return {"markPrice": str(PRICE)}
+
+    def fapiPublicGetExchangeInfo(self, params):
+        return FUT_INFO
+
+    def create_market_sell_order(self, symbol, qty):
+        if self.fail_sell:
+            raise RuntimeError("fut sell failed")
+        self.perp_amt -= qty
+        self.orders.append(("sell", qty, {}))
+        return {"id": f"f{len(self.orders)}"}
+
+    def create_market_buy_order(self, symbol, qty, params=None):
+        if self.fail_reduce:
+            raise RuntimeError("fut reduce failed")
+        self.perp_amt += qty
+        self.orders.append(("buy", qty, params or {}))
+        return {"id": f"f{len(self.orders)}"}
+
+
+def _snap(spot, fut):
+    return {"spot_usdt": spot.usdt, "spot_base": spot.base, "price": PRICE,
+            "fut": ce.parse_fut_account(fut.fapiPrivateV2GetAccount()),
+            "perp_amt": fut.perp_amt}
+
+
+def _mkts():
+    return ({"limits": {"cost": {"min": 10.0}}, "amount_step": 0.00001},
+            {"limits": {"cost": {"min": 100.0}}, "amount_step": 0.001})
+
+
+def test_open_happy_path():
+    spot, fut = FakeSpot(), FakeFut()
+    state = ce.load_state()
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.open_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
+    assert res["action"] == "opened"
+    # notional = min(10000*0.30, 20000*0.95) = 3000 → qty = 0.05
+    assert fut.orders == [("sell", 0.05, {})]
+    assert spot.orders == [("buy", 0.05)]
+    assert state["phase"] == "open"
+    assert state["qty"] == 0.05
+    assert os.path.exists(ce.ORDERS_CSV)
+
+
+def test_open_dry_run_no_orders():
+    spot, fut = FakeSpot(), FakeFut()
+    state = ce.load_state()
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.open_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=True)
+    assert res["action"] == "would_open"
+    assert fut.orders == [] and spot.orders == []
+    assert state["phase"] == "idle"
+
+
+def test_open_skips_if_position_exists():
+    spot, fut = FakeSpot(), FakeFut(perp_amt=-0.05)
+    state = ce.load_state()
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.open_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
+    assert res["action"] == "skip"
+    assert fut.orders == [] and spot.orders == []
+
+
+def test_open_futures_fail_clean_abort():
+    spot, fut = FakeSpot(), FakeFut(fail_sell=True)
+    state = ce.load_state()
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.open_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
+    assert res["action"] == "aborted_futures"
+    assert spot.orders == []                          # 현물은 손도 안 댐
+    assert state["phase"] == "idle"                   # 깨끗한 중단
+    assert state["naked_exposure"] is False
+
+
+def test_open_spot_fail_compensates_with_reduce_only():
+    spot, fut = FakeSpot(fail_buy=True), FakeFut()
+    state = ce.load_state()
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.open_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
+    assert res["action"] == "compensated"
+    # 숏 열림 → 현물 실패 → reduce-only 매수로 숏 닫힘
+    assert fut.orders[0][0] == "sell"
+    assert fut.orders[1][0] == "buy" and fut.orders[1][2].get("reduceOnly") is True
+    assert state["phase"] == "halted_manual"          # 보상 성공해도 halt (자동 재시도 금지)
+    assert state["naked_exposure"] is False
+
+
+def test_open_compensation_fail_naked_halt():
+    spot, fut = FakeSpot(fail_buy=True), FakeFut(fail_reduce=True)
+    state = ce.load_state()
+    spot_mkt, fut_mkt = _mkts()
+    res = ce.open_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
+    assert res["action"] == "error"
+    assert state["phase"] == "halted_manual"
+    assert state["naked_exposure"] is True            # 숏 단독 노출 — 수동 개입 필요
+
+
+def test_open_below_min_notional_skips():
+    spot, fut = FakeSpot(usdt=50.0), FakeFut(available=200.0)
+    state = ce.load_state()
+    spot_mkt, fut_mkt = _mkts()
+    # notional = min(200*0.3, 50*0.95)=47.5 < fut min 100 → skip
+    res = ce.open_carry(spot, fut, state, _snap(spot, fut), spot_mkt, fut_mkt, dry_run=False)
+    assert res["action"] == "skip"
+    assert fut.orders == [] and spot.orders == []
