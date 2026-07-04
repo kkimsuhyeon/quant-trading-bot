@@ -138,19 +138,16 @@ class FakeSpot:
     def public_get_exchangeinfo(self, params):
         return SPOT_INFO
 
-    def create_market_buy_order(self, symbol, qty):
-        if self.fail_buy:
-            raise RuntimeError("spot buy failed")
-        self.base += qty; self.usdt -= qty * PRICE
-        self.orders.append(("buy", qty))
-        return {"id": f"s{len(self.orders)}"}
-
-    def create_market_sell_order(self, symbol, qty):
-        if self.fail_sell:
-            raise RuntimeError("spot sell failed")
-        self.base -= qty; self.usdt += qty * PRICE
-        self.orders.append(("sell", qty))
-        return {"id": f"s{len(self.orders)}"}
+    def privatePostOrder(self, params):
+        qty = params["quantity"]
+        if params["side"] == "BUY":
+            if self.fail_buy: raise RuntimeError("spot buy failed")
+            self.base += qty; self.usdt -= qty * PRICE
+        else:
+            if self.fail_sell: raise RuntimeError("spot sell failed")
+            self.base -= qty; self.usdt += qty * PRICE
+        self.orders.append((params["side"].lower(), qty))
+        return {"orderId": f"s{len(self.orders)}"}
 
 
 class FakeFut:
@@ -399,9 +396,9 @@ def test_close_persists_state_before_each_order():
             return super().fapiPrivatePostOrder(params)
 
     class SpySpot(FakeSpot):
-        def create_market_sell_order(self, symbol, qty):
+        def privatePostOrder(self, params):
             captured["spot_phase"] = ce.load_state()["phase"]  # 현물 매도 주문 시점의 디스크 상태
-            return super().create_market_sell_order(symbol, qty)
+            return super().privatePostOrder(params)
 
     spot, fut = SpySpot(usdt=17000.0, base=0.05), SpyFut(perp_amt=-0.05)
     state = ce.load_state(); state["phase"] = "open"; state["qty"] = 0.05
@@ -560,9 +557,9 @@ def test_run_once_resume_persists_state_before_spot_order():
     captured = {}
 
     class SpySpot(FakeSpot):
-        def create_market_buy_order(self, symbol, qty):
+        def privatePostOrder(self, params):
             captured["phase"] = ce.load_state()["phase"]  # 재개 매수 주문 시점의 디스크 상태
-            return super().create_market_buy_order(symbol, qty)
+            return super().privatePostOrder(params)
 
     # opening_futures 폴스루로 진입 — 픽스 전에는 메모리 phase 변경이 미저장이라 디스크가
     # opening_futures인 채 주문이 나감 (선저장 회귀를 실제로 잡는 셋업)

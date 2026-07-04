@@ -11,7 +11,6 @@ from fapi_demo_logger import make_fapi_exchange, _assert_demo_fapi
 STATE_PATH = "paper/carry_state.json"
 ORDERS_CSV = "paper/carry_orders.csv"
 LOCK_PATH = "paper/.carry_lock"
-SYMBOL = "BTC/USDT"                 # ETH 확장 자리: 심볼 상수만 바꾸면 되는 구조 유지
 FUT_SYMBOL = "BTCUSDT"
 BASE_ASSET = "BTC"
 FUT_FRAC = 0.30                     # 선물 가용잔고 대비 노셔널 상한 (보수적 시작)
@@ -148,7 +147,8 @@ def open_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run):
     log_row({**base, "phase": "opening_spot", "action": "spot_buy_intent", "qty": spot_qty,
              "order_id": "", "note": ""})
     try:
-        o2 = spot_ex.create_market_buy_order(SYMBOL, spot_qty)
+        o2 = spot_ex.privatePostOrder({"symbol": FUT_SYMBOL, "side": "BUY",
+                                       "type": "MARKET", "quantity": spot_qty})
     except Exception as e:
         # 다리 2 실패 → 보상: 선물 reduce-only 청산. 성공해도 halt (자동 재시도 금지 — Codex)
         # 보상 주문 *전에* 선저장 — 크래시 시 디스크가 halted_manual+compensating이라 사람이 확인
@@ -174,7 +174,7 @@ def open_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run):
 
     state["phase"] = "open"; save_state(state)
     log_row({**base, "phase": "open", "action": "opened", "qty": spot_qty,
-             "order_id": o2.get("id"), "note": ""})
+             "order_id": o2.get("orderId"), "note": ""})
     return {"action": "opened", "qty": spot_qty}
 
 
@@ -223,7 +223,8 @@ def close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run, reason
         log_row({**base, "phase": "closing_spot", "action": "spot_sell_intent",
                  "qty": qty, "order_id": "", "note": reason})
         try:
-            o2 = spot_ex.create_market_sell_order(SYMBOL, qty)
+            o2 = spot_ex.privatePostOrder({"symbol": FUT_SYMBOL, "side": "SELL",
+                                           "type": "MARKET", "quantity": qty})
         except Exception as e:
             state["phase"] = "halted_manual"; state["reason"] = "close_spot_failed"
             save_state(state)
@@ -231,7 +232,7 @@ def close_carry(spot_ex, fut_ex, state, snap, spot_mkt, fut_mkt, dry_run, reason
                      "order_id": "", "note": f"spot_sell_failed:{type(e).__name__}"})
             return {"action": "error", "note": "close_spot_failed"}
         log_row({**base, "phase": "closing_spot", "action": "spot_sell",
-                 "qty": qty, "order_id": o2.get("id"), "note": reason})
+                 "qty": qty, "order_id": o2.get("orderId"), "note": reason})
 
     state["phase"] = final_phase; state["qty"] = 0.0; save_state(state)
     log_row({**base, "phase": final_phase, "action": "closed", "qty": 0, "order_id": "",
@@ -317,7 +318,8 @@ def run_once(live=False, confirm_open=False, spot_ex=None, fut_ex=None):
                 log_row({**base, "phase": "opening_spot", "action": "spot_buy_intent",
                          "qty": qty, "note": "resume"})
                 try:
-                    o = spot_ex.create_market_buy_order(SYMBOL, qty)
+                    o = spot_ex.privatePostOrder({"symbol": FUT_SYMBOL, "side": "BUY",
+                                                  "type": "MARKET", "quantity": qty})
                 except Exception as e:
                     state["phase"] = "halted_manual"; state["reason"] = "resume_spot_failed"
                     save_state(state)
@@ -326,7 +328,7 @@ def run_once(live=False, confirm_open=False, spot_ex=None, fut_ex=None):
                     return {"action": "error"}
                 state["phase"] = "open"; state["qty"] = filled; save_state(state)
                 log_row({**base, "phase": "open", "action": "resumed_open", "qty": qty,
-                         "order_id": o.get("id"), "note": "resume"})
+                         "order_id": o.get("orderId"), "note": "resume"})
                 return {"action": "resumed_open"}
 
         if state["phase"] in ("closing_futures", "closing_spot"):
