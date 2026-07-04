@@ -16,7 +16,7 @@ BASE_ASSET = "BTC"
 FUT_FRAC = 0.30                     # 선물 가용잔고 대비 노셔널 상한 (보수적 시작)
 SPOT_FRAC = 0.95                    # 현물 USDT 사용 상한 (수수료 버퍼)
 DD_LIMIT = 0.10                     # 합산 equity 고점대비 -10% (델타중립이라 타이트)
-MARGIN_MIN_RATIO = 0.5              # 선물 available/wallet < 0.5 → 가드
+MARGIN_MAX_RATIO = 0.5              # 바이낸스 마진비율 maintMargin/marginBalance — 강제청산=1.0, 0.5=보수적 조기 정지
 
 PHASES = ("idle", "opening_futures", "opening_spot", "open",
           "closing_futures", "closing_spot", "halted_manual")
@@ -54,15 +54,17 @@ def leg_mismatch(spot_base, perp_amt, price, min_notional):
     return abs(spot_base - abs(perp_amt)) * price >= min_notional
 
 
-def margin_breach(available, wallet):
-    return wallet > 0 and (available / wallet) < MARGIN_MIN_RATIO
+def margin_breach(maint_margin, margin_balance):
+    return margin_balance <= 0 or (maint_margin / margin_balance) > MARGIN_MAX_RATIO
 
 
 def parse_fut_account(raw):
     return {"wallet": float(raw["totalWalletBalance"]),
             "available": float(raw["availableBalance"]),
             "upnl": float(raw["totalUnrealizedProfit"]),
-            "can_trade": bool(raw["canTrade"])}
+            "can_trade": bool(raw["canTrade"]),
+            "maint_margin": float(raw["totalMaintMargin"]),
+            "margin_balance": float(raw["totalMarginBalance"])}
 
 
 def perp_position_amt(raw, symbol=FUT_SYMBOL):
@@ -352,7 +354,7 @@ def run_once(live=False, confirm_open=False, spot_ex=None, fut_ex=None):
                 return {"action": "halted", "reason": "leg_mismatch"}
 
             breach = update_high_water_and_breach(equity, state, dd_limit=DD_LIMIT)
-            guard = margin_breach(snap["fut"]["available"], snap["fut"]["wallet"])
+            guard = margin_breach(snap["fut"]["maint_margin"], snap["fut"]["margin_balance"])
             if breach or guard:
                 reason = f"drawdown<=-{int(DD_LIMIT*100)}%" if breach else "margin_guard"
                 state["reason"] = reason
@@ -376,7 +378,9 @@ def run_once(live=False, confirm_open=False, spot_ex=None, fut_ex=None):
         # 4) open & healthy → 무주문 (감사 로그만)
         log_row({**base, "action": "none", "note": "healthy"})
         if live: save_state(state)
-        print(f"[carry] phase={state['phase']} equity={equity:.2f} "
+        mbal = snap["fut"]["margin_balance"]
+        margin_str = f"{snap['fut']['maint_margin'] / mbal:.4f}" if mbal > 0 else "NA"
+        print(f"[carry] phase={state['phase']} equity={equity:.2f} margin={margin_str} "
               f"{'(dry-run)' if dry_run else ''}")
         return {"action": "none", "phase": state["phase"]}
     finally:

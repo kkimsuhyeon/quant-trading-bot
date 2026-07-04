@@ -89,8 +89,10 @@ notional = min(선물 availableBalance × 0.30, 현물 USDT × 0.95)   # 보수�
 1. **합산 equity DD −10%**: equity = 현물(USDT + base×가격) + 선물(walletBalance + UPnL).
    고점(high_water) 대비 −10% → halted 저장(먼저) → 청산 흐름 1회. 델타중립이라 −10%면
    뭔가 크게 잘못된 것 (현물 demo 실행기의 −15%보다 타이트).
-2. **선물 margin 가드**: availableBalance / walletBalance < 0.5 → halted + 청산.
-   (margin 필드의 demo 신뢰성은 48h 로거 데이터로 최종 확인 — Codex)
+2. **선물 margin 가드**: 바이낸스 마진비율 totalMaintMargin/totalMarginBalance > 0.5 (또는
+   marginBalance ≤ 0) → halted + 청산. 강제청산=1.0 기준의 보수적 조기 정지.
+   (~~availableBalance/walletBalance~~는 폐기 — multi-asset 모드에서 available은 "출금 가능
+   가상액"이라 포지션 오픈 시 담보 헤어컷으로 급감, 첫 live에서 오발동 실사례. Codex 합의)
 3. **다리 정합 체크**: |현물 base 보유 − |퍼프 숏 수량|| > dust 허용치(가격×차이 < min_notional
    이면 dust — demo_executor 판정 재사용) →
    **자동 보정 주문 금지, halted_manual + 수동확인만** (v1은 탐지+정지까지 — 자동

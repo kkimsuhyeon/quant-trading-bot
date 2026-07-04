@@ -49,16 +49,18 @@ def test_leg_mismatch_dust_tolerance():
 
 
 def test_margin_breach():
-    assert ce.margin_breach(available=4000, wallet=10000) is True    # 0.4 < 0.5
-    assert ce.margin_breach(available=6000, wallet=10000) is False
-    assert ce.margin_breach(available=0, wallet=0) is False          # 0 지갑 방어
+    assert ce.margin_breach(maint_margin=10, margin_balance=10000) is False   # 0.001
+    assert ce.margin_breach(maint_margin=5100, margin_balance=10000) is True  # 0.51
+    assert ce.margin_breach(maint_margin=10, margin_balance=0) is True        # 지갑 소진
 
 
 def test_parse_fut_account():
     raw = {"totalWalletBalance": "10500.5", "availableBalance": "9000.1",
-           "totalUnrealizedProfit": "-12.3", "canTrade": True}
+           "totalUnrealizedProfit": "-12.3", "canTrade": True,
+           "totalMaintMargin": "20.5", "totalMarginBalance": "10488.2"}
     a = ce.parse_fut_account(raw)
-    assert a == {"wallet": 10500.5, "available": 9000.1, "upnl": -12.3, "can_trade": True}
+    assert a == {"wallet": 10500.5, "available": 9000.1, "upnl": -12.3, "can_trade": True,
+                "maint_margin": 20.5, "margin_balance": 10488.2}
 
 
 def test_perp_position_amt():
@@ -152,18 +154,23 @@ class FakeSpot:
 
 class FakeFut:
     def __init__(self, wallet=10000.0, available=10000.0, upnl=0.0, perp_amt=0.0,
-                 fail_sell=False, fail_reduce=False, fill_on_fail=False):
+                 fail_sell=False, fail_reduce=False, fill_on_fail=False,
+                 maint_margin=0.0, margin_balance=None):
         self.urls = {"api": {"fapiPublic": "https://demo-fapi.binance.com/fapi",
                              "fapiPrivate": "https://demo-fapi.binance.com/fapi"}}
         self.wallet, self.available, self.upnl = wallet, available, upnl
         self.perp_amt = perp_amt
         self.fail_sell, self.fail_reduce = fail_sell, fail_reduce
         self.fill_on_fail = fill_on_fail                  # 타임아웃인데 실제론 체결됐던 경우 시뮬
+        self.maint_margin = maint_margin
+        self.margin_balance = wallet if margin_balance is None else margin_balance
         self.orders = []
 
     def fapiPrivateV2GetAccount(self):
         return {"totalWalletBalance": str(self.wallet), "availableBalance": str(self.available),
-                "totalUnrealizedProfit": str(self.upnl), "canTrade": True}
+                "totalUnrealizedProfit": str(self.upnl), "canTrade": True,
+                "totalMaintMargin": str(self.maint_margin),
+                "totalMarginBalance": str(self.margin_balance)}
 
     def fapiPrivateV2GetPositionRisk(self, params=None):
         return [{"symbol": "BTCUSDT", "positionAmt": str(self.perp_amt)}]
@@ -481,12 +488,26 @@ def test_run_once_dd_breach_closes_and_halts():
 
 def test_run_once_margin_guard_closes_and_halts():
     s = ce.load_state(); s["phase"] = "open"; s["qty"] = 0.05; ce.save_state(s)
-    spot, fut = FakeSpot(usdt=17000.0, base=0.05), FakeFut(wallet=10000.0, available=4000.0,
-                                                            perp_amt=-0.05)   # 0.4 < 0.5
+    spot, fut = FakeSpot(usdt=17000.0, base=0.05), FakeFut(wallet=10000.0,
+                                                            maint_margin=6000.0,
+                                                            margin_balance=10000.0,
+                                                            perp_amt=-0.05)   # 0.6 > 0.5
     res = _run(spot, fut, live=True)
     assert res["action"] == "kill_switch"
     st = ce.load_state()
     assert st["phase"] == "halted_manual" and st["reason"] == "margin_guard"
+
+
+def test_run_once_available_collapse_alone_does_not_trigger_margin_guard():
+    # 첫 live 실사례 회귀: multiAssetsMargin 계정에서 포지션 오픈 시 available이
+    # 담보 헤어컷으로 급감해도 그 자체는 margin_guard가 아니다 (Codex 합의)
+    s = ce.load_state(); s["phase"] = "open"; s["qty"] = 0.05; ce.save_state(s)
+    spot, fut = FakeSpot(usdt=17000.0, base=0.05), FakeFut(available=4000.0, wallet=10000.0,
+                                                            maint_margin=13.0,
+                                                            margin_balance=10500.0,
+                                                            perp_amt=-0.05)
+    res = _run(spot, fut, live=True)
+    assert res["action"] == "none"
 
 
 def test_run_once_resume_opening_futures_no_short_resets_idle():
